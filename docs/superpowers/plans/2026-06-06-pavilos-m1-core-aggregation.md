@@ -989,6 +989,8 @@ git commit -m "feat(aggregator): add async run loop with injected clock"
 
 ## Task 8: Replay harness + end-to-end test
 
+> **Correction applied during implementation (2026-06-06):** the original draft of this task used fixture timestamps `ts=1.0/2.0` with the test snapshotting at `now=100.0` and the CLI `main` at `now=1e12`. That contradicts the shipped `Aggregator.active(now)` staleness gate (`staleness_s=60.0`): every venue would be stale → `snapshot()` returns `None`, making the asserted outcomes impossible. **Resolution (implemented & merged):** fixture timestamps shifted to `40.0/40.0/41.0` (within 60 s of the test's `now=100.0`), and `main` snapshots at `now = max(u.ts for u in updates)` — the stream's own final clock, which is the semantically correct choice for a batch replay. The engine was NOT changed; the staleness gate is correct.
+
 **Files:**
 - Create: `scripts/replay.py`
 - Create: `tests/fixtures/replay_two_venues.jsonl`
