@@ -15,6 +15,10 @@ from pavilos.connectors.base import ConnectorHealth, ResyncRequired
 from pavilos.connectors.kraken import parse_kraken_message
 from pavilos.connectors.kraken_book import KrakenRawBook
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 KRAKEN_WS_URL = "wss://ws.kraken.com/v2"
 
 
@@ -78,6 +82,7 @@ class KrakenConnector:
                 pass
             except Exception:
                 self._errors += 1
+                _log.exception("kraken connector error; will reconnect")
             finally:
                 self._connected = False
             if stop.is_set():
