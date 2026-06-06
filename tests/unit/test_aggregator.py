@@ -1,4 +1,6 @@
 # tests/unit/test_aggregator.py
+import asyncio
+
 import pytest
 
 from pavilos.core.models import BookUpdate, VenueSpec, Quote, Tier
@@ -48,3 +50,27 @@ def test_aggregator_rejects_unknown_exchange():
     msg = str(exc_info.value)
     assert "ftx" in msg
     assert "kraken" in msg and "coinbase" in msg   # configured venues listed for diagnosis
+
+
+def test_run_emits_snapshot_then_stops():
+    async def scenario():
+        agg = Aggregator(_specs(), PegProvider(), bin_bps=100.0, window_bps=200.0, staleness_s=5.0)
+        in_q: asyncio.Queue = asyncio.Queue()
+        out_q: asyncio.Queue = asyncio.Queue()
+        await in_q.put(_snap("kraken", 1.0, [(100.0, 1.0)], [(101.0, 1.0)]))
+        await in_q.put(_snap("coinbase", 1.0, [(100.0, 0.5)], [(101.0, 0.5)]))
+
+        clock = {"t": 2.0}
+        stop = asyncio.Event()
+
+        task = asyncio.create_task(
+            agg.run(in_q, out_q, interval_s=0.0, now=lambda: clock["t"], stop=stop)
+        )
+        snap = await asyncio.wait_for(out_q.get(), timeout=1.0)
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+        return snap
+
+    snap = asyncio.run(scenario())
+    assert snap is not None
+    assert set(snap.venues_active) == {"kraken", "coinbase"}

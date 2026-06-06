@@ -2,7 +2,8 @@
 """Owns per-exchange BookStates and produces combined snapshots."""
 from __future__ import annotations
 
-from collections.abc import Sequence
+import asyncio
+from collections.abc import Callable, Sequence
 
 from pavilos.core.models import BookUpdate, CombinedDepthSnapshot, VenueSpec
 from pavilos.aggregator.book_state import BookState
@@ -56,3 +57,36 @@ class Aggregator:
             ts=now,
             active=self.active(now),
         )
+
+    async def run(
+        self,
+        in_q: "asyncio.Queue[BookUpdate]",
+        out_q: "asyncio.Queue[CombinedDepthSnapshot]",
+        *,
+        interval_s: float,
+        now: Callable[[], float],
+        stop: "asyncio.Event",
+    ) -> None:
+        """Drain ``in_q`` into the books and emit a snapshot every ``interval_s``.
+
+        Drains all immediately-available updates each tick, then emits one
+        combined snapshot (if any Tier-A venue is fresh). Exits when ``stop``
+        is set. ``now`` is injected for deterministic testing.
+        """
+        while not stop.is_set():
+            # Drain everything currently queued without blocking.
+            while True:
+                try:
+                    self.apply(in_q.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            snap = self.snapshot(now())
+            if snap is not None:
+                await out_q.put(snap)
+            if interval_s > 0:
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=interval_s)
+                except asyncio.TimeoutError:
+                    pass
+            else:
+                await asyncio.sleep(0)  # yield control
