@@ -72,6 +72,13 @@ class Aggregator:
         Drains all immediately-available updates each tick, then emits one
         combined snapshot (if any Tier-A venue is fresh). Exits when ``stop``
         is set. ``now`` is injected for deterministic testing.
+
+        Pass a POSITIVE ``interval_s`` in production: ``interval_s == 0``
+        busy-spins (yields each tick, emitting as fast as the scheduler allows)
+        and is intended only for tests. The caller owns ``out_q`` sizing: this
+        uses ``await out_q.put(...)``, so passing a bounded queue yields natural
+        back-pressure, while an unbounded queue with a slow consumer can grow
+        without limit.
         """
         while not stop.is_set():
             # Drain everything currently queued without blocking.
