@@ -45,3 +45,18 @@ def test_book_checksum_uses_only_top_10_each_side():
     full = book_checksum(asks, bids)
     trimmed = book_checksum(asks[:10], bids[:10])
     assert full == trimmed
+
+
+def test_fmt_handles_no_decimal_point_and_all_zeros():
+    # integer-valued strings (no '.') pass through, minus any leading zeros
+    assert _fmt("12345") == "12345"
+    assert _fmt("007") == "7"
+    # all-zero inputs fall back to "0" (defensive; removed levels never reach here)
+    assert _fmt("0") == "0"
+    assert _fmt("0.00000000") == "0"
+
+
+def test_book_checksum_empty_book_is_crc_of_empty_string():
+    # documents the edge: an empty book hashes the empty string -> 0.
+    # (M1c's apply+verify loop must never checksum an empty side; this pins the contract.)
+    assert book_checksum([], []) == 0
