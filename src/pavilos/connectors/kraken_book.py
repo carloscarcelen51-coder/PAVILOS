@@ -22,7 +22,13 @@ def _to_str(v: object) -> str:
 
 
 class KrakenRawBook:
-    """Maintains one Kraken book at full string precision for CRC32 verification."""
+    """Maintains one Kraken book at full string precision for CRC32 verification.
+
+    Price strings are dict keys, which assumes Kraken sends each price at a fixed
+    precision per pair (true for v2). If the same price ever arrived in two string
+    forms (e.g. "100.0" vs "100.00"), the computed checksum would diverge from the
+    frame's and the connector would re-subscribe (a self-healing spurious resync,
+    not data corruption)."""
 
     def __init__(self, symbol: str, *, depth: int = 10) -> None:
         self.symbol = symbol
@@ -52,6 +58,7 @@ class KrakenRawBook:
             side[price] = qty
 
     def checksum(self) -> int:
+        # Kraken's CRC is ALWAYS over the top 10 levels, regardless of subscribed depth.
         asks = sorted(self._asks.items(), key=lambda kv: Decimal(kv[0]))[:10]
         bids = sorted(self._bids.items(), key=lambda kv: Decimal(kv[0]), reverse=True)[:10]
         return book_checksum([(p, q) for p, q in asks], [(p, q) for p, q in bids])
