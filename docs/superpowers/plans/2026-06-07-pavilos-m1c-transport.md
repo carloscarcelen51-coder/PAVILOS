@@ -236,6 +236,15 @@ git commit -m "feat(connectors): add KrakenRawBook (Decimal book for CRC32 verif
 
 ## Task 3: KrakenConnector (async run loop, injectable transport)
 
+> **Correction applied during implementation (2026-06-07):** the draft test's
+> `_frame("update", ...)` helper computed the frame checksum over only the delta
+> levels, but Kraken's CRC32 (and `KrakenRawBook`, correctly) covers the FULL
+> cumulative top-10 book after the update. The shipped test therefore uses a
+> `_FrameBuilder` (backed by `KrakenRawBook`) that checksums the cumulative book
+> per frame; `_frame` is kept only for standalone snapshots (where the listed
+> levels ARE the whole book). The connector implementation below is unchanged
+> and correct.
+
 **Files:**
 - Create: `src/pavilos/connectors/kraken_connector.py`
 - Test: `tests/unit/test_kraken_connector.py`
