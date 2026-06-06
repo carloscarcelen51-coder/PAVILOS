@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import zlib
 
+from pavilos.core.models import BookUpdate
+
 
 def _fmt(value: str) -> str:
     """Kraken checksum formatting for one price or qty string: remove the decimal
@@ -28,3 +30,24 @@ def book_checksum(asks: list[tuple[str, str]], bids: list[tuple[str, str]]) -> i
     for price, qty in bids[:10]:
         parts.append(_fmt(price) + _fmt(qty))
     return _crc32("".join(parts))
+
+
+def parse_kraken_message(msg: dict, *, ts: float, exchange: str = "kraken") -> BookUpdate:
+    """Convert a decoded Kraken v2 ``book`` message into a ``BookUpdate``.
+
+    ``type:"snapshot"`` -> ``is_snapshot=True``; ``"update"`` -> ``False``.
+    Levels are taken from ``data[0]`` and converted to float (price, qty) tuples;
+    ``qty == 0`` levels are preserved verbatim (``BookState`` removes them on
+    apply). The book channel has no sequence number, so ``seq`` is ``None`` —
+    integrity is verified separately via the CRC32 checksum."""
+    data = msg["data"][0]
+    bids = tuple((float(lvl["price"]), float(lvl["qty"])) for lvl in data["bids"])
+    asks = tuple((float(lvl["price"]), float(lvl["qty"])) for lvl in data["asks"])
+    return BookUpdate(
+        exchange=exchange,
+        ts=ts,
+        bids=bids,
+        asks=asks,
+        is_snapshot=(msg["type"] == "snapshot"),
+        seq=None,
+    )

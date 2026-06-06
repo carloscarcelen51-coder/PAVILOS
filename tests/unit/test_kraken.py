@@ -60,3 +60,41 @@ def test_book_checksum_empty_book_is_crc_of_empty_string():
     # documents the edge: an empty book hashes the empty string -> 0.
     # (M1c's apply+verify loop must never checksum an empty side; this pins the contract.)
     assert book_checksum([], []) == 0
+
+
+from pavilos.core.models import BookUpdate
+from pavilos.connectors.kraken import parse_kraken_message
+
+
+def _kraken_msg(mtype, bids, asks, checksum=0):
+    return {
+        "channel": "book",
+        "type": mtype,
+        "data": [{
+            "symbol": "BTC/USD",
+            "bids": [{"price": p, "qty": q} for p, q in bids],
+            "asks": [{"price": p, "qty": q} for p, q in asks],
+            "checksum": checksum,
+            "timestamp": "2023-10-06T17:35:55.440295Z",
+        }],
+    }
+
+
+def test_parse_snapshot_message():
+    msg = _kraken_msg("snapshot", bids=[(100.0, 1.0), (99.0, 2.0)], asks=[(101.0, 1.5)])
+    u = parse_kraken_message(msg, ts=5.0)
+    assert isinstance(u, BookUpdate)
+    assert u.exchange == "kraken"
+    assert u.is_snapshot is True
+    assert u.ts == 5.0
+    assert u.seq is None
+    assert u.bids == ((100.0, 1.0), (99.0, 2.0))
+    assert u.asks == ((101.0, 1.5),)
+
+
+def test_parse_update_message_with_removal():
+    msg = _kraken_msg("update", bids=[(100.0, 0.0)], asks=[(101.5, 2.0)])
+    u = parse_kraken_message(msg, ts=6.0)
+    assert u.is_snapshot is False
+    assert u.bids == ((100.0, 0.0),)   # qty 0 preserved; BookState removes on apply
+    assert u.asks == ((101.5, 2.0),)
