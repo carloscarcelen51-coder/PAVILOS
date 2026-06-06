@@ -86,3 +86,42 @@ def test_build_combined_returns_none_without_active_tier_a():
     snap = build_combined(books, specs, PegProvider(), bin_bps=100.0, window_bps=200.0,
                           ts=5.0, active=set())
     assert snap is None
+
+
+def test_build_combined_collapses_multiple_levels_into_one_bin():
+    books = {"kraken": _book("kraken", [(100.4, 2.0), (100.3, 2.0), (100.2, 2.0)], [(100.6, 1.0)])}
+    specs = {"kraken": VenueSpec("kraken", Quote.USD, Tier.A)}
+    snap = build_combined(books, specs, PegProvider(), bin_bps=100.0, window_bps=200.0,
+                          ts=5.0, active={"kraken"})
+    assert snap is not None
+    assert snap.mid == pytest.approx(100.5)
+    # the three bids fall in the same bin -> one combined bin of size 6.0
+    assert len(snap.bids) == 1
+    assert snap.bids[0].size == pytest.approx(6.0)
+    assert snap.bids[0].composition == {"kraken": pytest.approx(6.0)}
+
+
+def test_build_combined_drops_levels_outside_window():
+    books = {"kraken": _book("kraken", [(100.0, 1.0), (95.0, 5.0)], [(101.0, 1.0)])}
+    specs = {"kraken": VenueSpec("kraken", Quote.USD, Tier.A)}
+    # mid = 100.5, window 200 bps -> half-window ~ $2.01, so 95.0 is excluded, 100.0 kept
+    snap = build_combined(books, specs, PegProvider(), bin_bps=100.0, window_bps=200.0,
+                          ts=5.0, active={"kraken"})
+    assert snap is not None
+    assert sum(b.size for b in snap.bids) == pytest.approx(1.0)   # the 95.0/size-5 level dropped
+    assert all(b.price > 98.0 for b in snap.bids)
+
+
+def test_build_combined_applies_non_unit_peg_rate():
+    peg = PegProvider()
+    peg.set_rate(Quote.USDT, 0.99)        # USDT priced below USD
+    books = {"binance": _book("binance", [(101.0, 1.0)], [(102.0, 1.0)])}
+    specs = {"binance": VenueSpec("binance", Quote.USDT, Tier.A)}
+    snap = build_combined(books, specs, peg, bin_bps=100.0, window_bps=200.0,
+                          ts=5.0, active={"binance"})
+    assert snap is not None
+    # USDT mid 101.5 * 0.99 = 100.485 -> combined USD mid reflects the conversion
+    assert snap.mid == pytest.approx(100.485)
+    assert snap.venues_active == ("binance",)
+    assert sum(b.size for b in snap.bids) == pytest.approx(1.0)
+    assert sum(a.size for a in snap.asks) == pytest.approx(1.0)
