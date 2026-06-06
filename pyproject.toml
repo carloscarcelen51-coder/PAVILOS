@@ -3,7 +3,10 @@ name = "pavilos"
 version = "0.1.0"
 description = "Multi-exchange BTC order-book aggregation and support/resistance trading engine"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "websockets>=12",
+    "aiohttp>=3.9",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
