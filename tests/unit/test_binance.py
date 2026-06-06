@@ -65,3 +65,23 @@ def test_apply_before_seed_raises():
     feed = BinanceDepthFeed("BTCUSDT")
     with pytest.raises(ResyncRequired):
         feed.apply(_event(U=1, u=2, bids=[], asks=[]))
+
+
+def test_reseed_after_resync_resumes():
+    feed = BinanceDepthFeed("BTCUSDT")
+    feed.seed(_snapshot(100, [["100.0", "1.0"]], [["101.0", "2.0"]]), ts=5.0)
+    with pytest.raises(ResyncRequired):
+        feed.apply(_event(U=103, u=104, bids=[], asks=[]))
+    # caller re-seeds from a fresh snapshot; the feed resumes cleanly from the new id
+    snap = feed.seed(_snapshot(200, [["100.0", "1.0"]], [["101.0", "2.0"]]), ts=9.0)
+    assert snap.seq == 200
+    u = feed.apply(_event(U=201, u=202, bids=[["100.0", "3.0"]], asks=[]))
+    assert u is not None and u.seq == 202
+
+
+def test_single_id_boundary_event_applies():
+    feed = BinanceDepthFeed("BTCUSDT")
+    feed.seed(_snapshot(100, [["100.0", "1.0"]], [["101.0", "2.0"]]), ts=5.0)
+    # event covering exactly one id at the boundary: U == u == last+1 == 101
+    u = feed.apply(_event(U=101, u=101, bids=[["100.0", "1.5"]], asks=[]))
+    assert u is not None and u.seq == 101

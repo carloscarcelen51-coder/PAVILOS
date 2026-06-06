@@ -44,7 +44,10 @@ class BinanceDepthFeed:
         Returns an update ``BookUpdate``, or ``None`` if the event is stale
         (``u <= last_update_id``). Raises ``ResyncRequired`` if not seeded or on a
         gap (``U > last_update_id + 1``). Absolute sizes; ``qty == "0"`` removals
-        are passed through verbatim (BookState removes them on apply)."""
+        are passed through verbatim (BookState removes them on apply). The emitted
+        ``ts`` is the exchange event time (``E``/1000); ``seed`` instead uses the
+        caller-supplied receive time, so treat this feed's ``BookUpdate.ts`` as a
+        mixed clock (ordering relies on ``seq``, not ``ts``)."""
         if self._last_update_id is None:
             raise ResyncRequired("binance: apply before seed")
         first_id = int(event["U"])
