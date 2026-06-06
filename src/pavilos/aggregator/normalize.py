@@ -2,6 +2,8 @@
 """Convert prices from a quote currency to USD using live-updatable rates."""
 from __future__ import annotations
 
+import math
+
 from pavilos.core.models import Quote
 
 
@@ -25,8 +27,8 @@ class PegProvider:
                 self.set_rate(quote, rate)
 
     def set_rate(self, quote: Quote, rate: float) -> None:
-        if rate <= 0:
-            raise ValueError(f"rate for {quote} must be positive, got {rate}")
+        if not math.isfinite(rate) or rate <= 0:
+            raise ValueError(f"rate for {quote} must be a positive finite number, got {rate}")
         self._rates[quote] = rate
 
     def to_usd(self, price: float, quote: Quote) -> float:

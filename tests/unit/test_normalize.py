@@ -30,3 +30,11 @@ def test_rate_must_be_positive():
     peg = PegProvider()
     with pytest.raises(ValueError):
         peg.set_rate(Quote.JPY, 0.0)
+
+
+def test_rate_must_be_finite():
+    peg = PegProvider()
+    with pytest.raises(ValueError):
+        peg.set_rate(Quote.USDT, float("nan"))
+    with pytest.raises(ValueError):
+        peg.set_rate(Quote.USDT, float("inf"))
