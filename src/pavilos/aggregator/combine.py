@@ -43,6 +43,11 @@ def build_combined(
     buckets around the combined mid, and summed across venues. Levels beyond
     ``window_bps`` from mid are ignored. Returns ``None`` if no Tier-A venue is
     active.
+
+    Callers must pass positive ``bin_bps`` and ``window_bps`` (validated at
+    config-load time, not here). Levels on the wrong side of the combined mid
+    (a venue's bid priced above mid, or ask priced below it — possible when
+    venues' books straddle the median mid) are intentionally dropped.
     """
     contributors: list[tuple[str, BookState, float]] = []  # (exchange, book, usd_mid)
     for exchange, book in books.items():
@@ -65,22 +70,24 @@ def build_combined(
     ask_size: dict[int, float] = {}
     ask_comp: dict[int, dict[str, float]] = {}
 
+    def _accumulate(levels, quote, exchange, *, is_bid, size_map, comp_map):
+        for price, size in levels:
+            usd = peg.to_usd(price, quote)
+            if is_bid:
+                if not (mid - half_window <= usd < mid):
+                    continue
+            else:
+                if not (mid < usd <= mid + half_window):
+                    continue
+            idx = bin_index(usd, mid, bin_bps)
+            size_map[idx] = size_map.get(idx, 0.0) + size
+            comp = comp_map.setdefault(idx, {})
+            comp[exchange] = comp.get(exchange, 0.0) + size
+
     for exchange, book, _ in contributors:
         quote = specs[exchange].quote
-        for price, size in book.bids().items():
-            usd = peg.to_usd(price, quote)
-            if usd < mid - half_window or usd >= mid:
-                continue
-            idx = bin_index(usd, mid, bin_bps)
-            bid_size[idx] = bid_size.get(idx, 0.0) + size
-            bid_comp.setdefault(idx, {})[exchange] = bid_comp.setdefault(idx, {}).get(exchange, 0.0) + size
-        for price, size in book.asks().items():
-            usd = peg.to_usd(price, quote)
-            if usd > mid + half_window or usd <= mid:
-                continue
-            idx = bin_index(usd, mid, bin_bps)
-            ask_size[idx] = ask_size.get(idx, 0.0) + size
-            ask_comp.setdefault(idx, {})[exchange] = ask_comp.setdefault(idx, {}).get(exchange, 0.0) + size
+        _accumulate(book.bids().items(), quote, exchange, is_bid=True, size_map=bid_size, comp_map=bid_comp)
+        _accumulate(book.asks().items(), quote, exchange, is_bid=False, size_map=ask_size, comp_map=ask_comp)
 
     bids = tuple(
         DepthBin(price=_bin_center_price(idx, mid, bin_bps), size=bid_size[idx], composition=bid_comp[idx])
