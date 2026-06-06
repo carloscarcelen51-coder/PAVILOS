@@ -98,3 +98,11 @@ def test_parse_update_message_with_removal():
     assert u.is_snapshot is False
     assert u.bids == ((100.0, 0.0),)   # qty 0 preserved; BookState removes on apply
     assert u.asks == ((101.5, 2.0),)
+
+
+def test_parse_update_one_sided_empty_asks():
+    msg = _kraken_msg("update", bids=[(100.0, 1.0)], asks=[])
+    u = parse_kraken_message(msg, ts=7.0)
+    assert u.is_snapshot is False
+    assert u.bids == ((100.0, 1.0),)
+    assert u.asks == ()   # empty side -> empty tuple

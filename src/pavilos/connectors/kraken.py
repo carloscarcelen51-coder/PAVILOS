@@ -39,7 +39,9 @@ def parse_kraken_message(msg: dict, *, ts: float, exchange: str = "kraken") -> B
     Levels are taken from ``data[0]`` and converted to float (price, qty) tuples;
     ``qty == 0`` levels are preserved verbatim (``BookState`` removes them on
     apply). The book channel has no sequence number, so ``seq`` is ``None`` —
-    integrity is verified separately via the CRC32 checksum."""
+    integrity is verified separately via the CRC32 checksum. Only ``book``-channel
+    ``snapshot``/``update`` frames are expected here (the transport routes other
+    frame types elsewhere); any other ``type`` is treated as a non-snapshot update."""
     data = msg["data"][0]
     bids = tuple((float(lvl["price"]), float(lvl["qty"])) for lvl in data["bids"])
     asks = tuple((float(lvl["price"]), float(lvl["qty"])) for lvl in data["asks"])
