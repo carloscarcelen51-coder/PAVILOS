@@ -7,10 +7,9 @@ import json
 import sys
 from pathlib import Path
 
-from pavilos.core.models import BookUpdate, VenueSpec, Quote, Tier
+from pavilos.core.models import BookUpdate, CombinedDepthSnapshot, Quote, Tier, VenueSpec
 from pavilos.aggregator.normalize import PegProvider
 from pavilos.aggregator.aggregator import Aggregator
-from pavilos.core.models import CombinedDepthSnapshot
 
 
 def load_updates(path: Path) -> list[BookUpdate]:
