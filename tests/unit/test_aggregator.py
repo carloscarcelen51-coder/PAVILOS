@@ -43,5 +43,8 @@ def test_aggregator_excludes_stale_venue():
 
 def test_aggregator_rejects_unknown_exchange():
     agg = Aggregator(_specs(), PegProvider(), bin_bps=100.0, window_bps=200.0, staleness_s=5.0)
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError) as exc_info:
         agg.apply(_snap("ftx", 1.0, [(100.0, 1.0)], [(101.0, 1.0)]))
+    msg = str(exc_info.value)
+    assert "ftx" in msg
+    assert "kraken" in msg and "coinbase" in msg   # configured venues listed for diagnosis

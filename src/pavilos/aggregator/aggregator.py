@@ -31,7 +31,13 @@ class Aggregator:
         self._staleness_s = staleness_s
 
     def apply(self, u: BookUpdate) -> None:
-        self._books[u.exchange].apply(u)  # KeyError on unknown exchange (by design)
+        book = self._books.get(u.exchange)
+        if book is None:
+            # Fail loud: a misrouted feed is a config/connector bug, not a new venue.
+            raise KeyError(
+                f"unknown exchange {u.exchange!r}; configured: {sorted(self._books)}"
+            )
+        book.apply(u)
 
     def active(self, now: float) -> set[str]:
         return {
