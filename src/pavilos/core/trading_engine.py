@@ -23,18 +23,21 @@ class TradingEngine:
     the queue is idle.
     """
 
-    def __init__(self, detector: Detector, atr: ATR, signal: SignalEngine,
-                 broker: PaperBroker) -> None:
+    def __init__(self, detector: Detector, atr: ATR, signal: SignalEngine, broker,
+                 observer=None) -> None:
         self.detector = detector
         self.atr = atr
         self.signal = signal
         self.broker = broker
+        self.observer = observer
 
     def process(self, snapshot: CombinedDepthSnapshot) -> None:
         """One snapshot through the full pipeline (sync, deterministic)."""
         analysis = self.detector.update(snapshot)
         self.atr.update(snapshot.mid)
         self.signal.update(analysis, self.atr.value(), self.broker)
+        if self.observer is not None:
+            self.observer(snapshot, analysis, self.broker)
 
     async def run(self, snapshots: "asyncio.Queue[CombinedDepthSnapshot]",
                   stop: "asyncio.Event") -> None:
