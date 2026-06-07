@@ -18,7 +18,7 @@ _EMPTY: dict = {
 def _zone(z) -> dict:
     return {"side": z.side.value, "price": z.price, "low": z.low, "high": z.high,
             "strength": z.strength, "venues": list(z.venues),
-            "persistence_s": z.persistence_s, "confidence": z.confidence}
+            "persistence_s": z.persistence_s, "pulled": z.pulled, "confidence": z.confidence}
 
 
 class DashboardState:
@@ -33,6 +33,7 @@ class DashboardState:
         pos = broker.position()
         pend = broker.pending_entry()
         fills = broker.fills()[-12:]
+        mark_equity = broker.equity(analysis.mid)  # mark-to-market once; reuse below
         snap = {
             "ts": analysis.ts,
             "mid": analysis.mid,
@@ -43,8 +44,8 @@ class DashboardState:
                 "side": pos.side, "size": pos.size, "entry": pos.entry, "stop": pos.stop},
             "pending": None if pend is None else {
                 "side": pend["side"], "trigger": pend["trigger"], "stop": pend["stop"], "size": pend["size"]},
-            "equity": broker.equity(analysis.mid),
-            "realized_equity": broker.equity(analysis.mid) if pos is None else broker.equity(analysis.mid) - (
+            "equity": mark_equity,
+            "realized_equity": mark_equity if pos is None else mark_equity - (
                 pos.size * (analysis.mid - pos.entry) if pos.side == "LONG" else pos.size * (pos.entry - analysis.mid)),
             "fills": [{"ts": f.ts, "side": f.side, "price": f.price, "size": f.size,
                        "fee": f.fee, "kind": f.kind} for f in fills],

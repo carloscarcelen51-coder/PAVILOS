@@ -26,6 +26,11 @@ _SYMBOLS = {"kraken": "BTC/USD", "binance": "BTCUSDT", "coinbase": "BTC-USD",
             "okx": "BTC-USDT", "bybit": "BTCUSDT", "bitstamp": "btcusd"}
 
 
+def _wall_now() -> float:
+    import time
+    return time.time()
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
     symbols: dict = field(default_factory=lambda: dict(_SYMBOLS))
@@ -71,7 +76,8 @@ class Runtime:
 
     @classmethod
     def build(cls, config: RuntimeConfig, *,
-              connector_factory: Callable[[str, str], object] = build_connector) -> "Runtime":
+              connector_factory: Callable[[str, str], object] = build_connector,
+              now: Callable[[], float] = _wall_now) -> "Runtime":
         connectors = [connector_factory(v, config.symbols[v]) for v in config.symbols]
         agg = Aggregator(list(VENUE_SPECS), PegProvider(), bin_bps=config.bin_bps,
                          window_bps=config.window_bps, staleness_s=config.staleness_s)
@@ -91,8 +97,11 @@ class Runtime:
         state = DashboardState()
 
         def observer(snapshot, analysis, brk) -> None:
+            # Use a real wall clock (not analysis.ts) so (now - analysis.ts)
+            # measures actual feed lag and the dashboard stale flag is meaningful;
+            # passing now=analysis.ts would make the difference always 0.
             state.update(analysis, brk, engine.health(), engine_state=signal.state,
-                         now=analysis.ts, staleness_s=config.staleness_s)
+                         now=now(), staleness_s=config.staleness_s)
 
         trading_engine = TradingEngine(detector, ATR(window=config.atr_window), signal, broker, observer=observer)
         return cls(engine, trading_engine, state, config)

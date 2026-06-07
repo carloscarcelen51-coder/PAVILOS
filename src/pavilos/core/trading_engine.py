@@ -4,12 +4,15 @@ signals -> paper broker. Network-free; the snapshot source is injected."""
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from pavilos.core.models import CombinedDepthSnapshot
 from pavilos.detection.detector import Detector
 from pavilos.execution.broker import PaperBroker
 from pavilos.signals.atr import ATR
 from pavilos.signals.engine import SignalEngine
+
+_log = logging.getLogger(__name__)
 
 
 class TradingEngine:
@@ -21,9 +24,14 @@ class TradingEngine:
     propagates out and stops the loop; the caller/supervisor must await the task
     to observe it), and its shutdown is bounded — ``stop`` is honoured even when
     the queue is idle.
+
+    The optional ``observer`` (dashboard telemetry sink) is best-effort: an
+    exception raised inside it is swallowed and logged in :meth:`process` so a
+    dashboard/serialization bug can never take the trading strategy offline. The
+    trading-critical pipeline (detector/atr/signal) remains crash-loud.
     """
 
-    def __init__(self, detector: Detector, atr: ATR, signal: SignalEngine, broker,
+    def __init__(self, detector: Detector, atr: ATR, signal: SignalEngine, broker: PaperBroker,
                  observer=None) -> None:
         self.detector = detector
         self.atr = atr
@@ -37,7 +45,14 @@ class TradingEngine:
         self.atr.update(snapshot.mid)
         self.signal.update(analysis, self.atr.value(), self.broker)
         if self.observer is not None:
-            self.observer(snapshot, analysis, self.broker)
+            # The observer is best-effort telemetry (the dashboard sink). A bug in
+            # it must NEVER take the trading strategy offline, so we swallow+log
+            # instead of letting it propagate. The trading-critical pipeline above
+            # (detector/atr/signal) stays crash-loud.
+            try:
+                self.observer(snapshot, analysis, self.broker)
+            except Exception:
+                _log.exception("dashboard observer failed; continuing trading")
 
     async def run(self, snapshots: "asyncio.Queue[CombinedDepthSnapshot]",
                   stop: "asyncio.Event") -> None:

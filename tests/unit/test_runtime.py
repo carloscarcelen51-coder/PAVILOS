@@ -23,6 +23,49 @@ def test_build_wires_full_graph_with_injected_connectors():
     assert rt.state.snapshot()["state"] == "IDLE"
 
 
+def test_observer_feeds_wall_clock_not_feed_ts():
+    # The staleness flag is only meaningful if the observer compares a real wall
+    # clock against the feed ts. Inject a clock far ahead of the feed ts and assert
+    # the served snapshot reports stale=True (the runtime must NOT pass now=ts).
+    from pavilos.core.models import DepthBin, CombinedDepthSnapshot
+
+    cfg = RuntimeConfig(staleness_s=15.0)
+    rt = Runtime.build(cfg, connector_factory=lambda v, sym: _FakeConnector(v),
+                       now=lambda: 1_000_000.0)  # wall clock far ahead of feed ts
+
+    snap = CombinedDepthSnapshot(
+        ts=1.0, mid=100.0,
+        bids=(DepthBin(price=99.0, size=1.0, composition={"k": 1.0}),),
+        asks=(DepthBin(price=101.0, size=1.0, composition={"k": 1.0}),),
+        venues_active=("k",), venues_total=1)
+    rt.trading_engine.process(snap)
+    assert rt.state.snapshot()["stale"] is True
+
+
+def test_observer_error_does_not_propagate_out_of_process():
+    # A dashboard/serialization bug (here: state.update raising) must NEVER crash
+    # the trading loop. Build a real Runtime, monkeypatch state.update to raise,
+    # feed a fake snapshot through TradingEngine.process, and assert no exception
+    # escapes (observer is best-effort telemetry).
+    from pavilos.core.models import DepthBin, CombinedDepthSnapshot
+
+    rt = Runtime.build(RuntimeConfig(), connector_factory=lambda v, sym: _FakeConnector(v))
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("dashboard serialization bug")
+
+    rt.state.update = boom  # type: ignore[assignment]
+
+    snap = CombinedDepthSnapshot(
+        ts=1.0, mid=100.0,
+        bids=(DepthBin(price=99.0, size=1.0, composition={"k": 1.0}),),
+        asks=(DepthBin(price=101.0, size=1.0, composition={"k": 1.0}),),
+        venues_active=("k",), venues_total=1)
+
+    # Must not raise — the observer swallows the error and trading continues.
+    rt.trading_engine.process(snap)
+
+
 def test_supervisor_restarts_a_crashing_trading_loop():
     rt = Runtime.build(RuntimeConfig(), connector_factory=lambda v, sym: _FakeConnector(v))
     calls = {"n": 0}
