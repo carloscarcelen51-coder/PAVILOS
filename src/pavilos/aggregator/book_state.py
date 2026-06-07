@@ -2,6 +2,7 @@
 """Maintain ONE exchange's L2 order book from absolute-size updates."""
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 
 from pavilos.core.models import BookUpdate
@@ -29,8 +30,8 @@ class BookState:
             if u.seq <= self.last_seq:
                 return  # stale / duplicate
         if u.is_snapshot:
-            self._bids = {p: s for p, s in u.bids if s > 0}
-            self._asks = {p: s for p, s in u.asks if s > 0}
+            self._bids = {p: s for p, s in u.bids if s > 0 and math.isfinite(p) and math.isfinite(s)}
+            self._asks = {p: s for p, s in u.asks if s > 0 and math.isfinite(p) and math.isfinite(s)}
         else:
             self._apply_side(self._bids, u.bids)
             self._apply_side(self._asks, u.asks)
@@ -41,6 +42,8 @@ class BookState:
     @staticmethod
     def _apply_side(book: dict[float, float], levels: Iterable[tuple[float, float]]) -> None:
         for price, size in levels:
+            if not (math.isfinite(price) and math.isfinite(size)):
+                continue  # never let a malformed (NaN/inf) level enter the book
             if size <= 0:
                 book.pop(price, None)
             else:

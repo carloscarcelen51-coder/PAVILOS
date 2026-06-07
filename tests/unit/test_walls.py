@@ -26,3 +26,19 @@ def test_empty_or_uniform_book_has_no_walls():
     assert detect_walls([], size_multiple=3.0, min_size=0.0) == []
     uniform = [_bin(100.0, 5.0), _bin(99.0, 5.0), _bin(98.0, 5.0)]
     assert detect_walls(uniform, size_multiple=3.0, min_size=0.0) == []  # none exceeds 3x median
+
+
+def test_non_finite_bins_are_ignored():
+    bins = [_bin(100.0, 1.0), _bin(99.0, 1.0), _bin(98.0, 50.0), _bin(97.0, 1.0),
+            _bin(96.0, float("nan")), _bin(95.0, float("inf"))]
+    walls = detect_walls(bins, size_multiple=3.0, min_size=0.0)
+    assert len(walls) == 1 and walls[0].bin.price == 98.0 and walls[0].prominence == 50.0
+
+
+def test_non_finite_position_does_not_change_result():
+    real = [_bin(100.0, 1.0), _bin(99.0, 1.0), _bin(98.0, 50.0), _bin(97.0, 1.0)]
+    nan = _bin(96.0, float("nan"))
+    a = detect_walls([nan] + real, size_multiple=3.0, min_size=0.0)
+    b = detect_walls(real + [nan], size_multiple=3.0, min_size=0.0)
+    norm = lambda ws: [(w.bin.price, w.prominence) for w in ws]
+    assert norm(a) == norm(b) == [(98.0, 50.0)]   # deterministic regardless of NaN position

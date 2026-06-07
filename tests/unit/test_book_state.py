@@ -43,6 +43,15 @@ def test_snapshot_resets_previous_state():
     assert bs.asks() == {102.0: 1.0}
 
 
+def test_non_finite_price_or_size_levels_are_dropped():
+    bs = BookState("kraken")
+    bs.apply(_snap(bids=[(100.0, 1.0), (float("nan"), 5.0), (99.0, float("inf"))], asks=[(101.0, 2.0)]))
+    assert bs.bids() == {100.0: 1.0}   # NaN-price and inf-size levels never enter the book
+    assert bs.asks() == {101.0: 2.0}
+    bs.apply(_upd(ts=2.0, bids=[(98.0, float("nan")), (100.0, 3.0)], asks=[]))
+    assert bs.bids() == {100.0: 3.0}   # malformed level skipped; valid update still applied
+
+
 def test_stale_or_duplicate_seq_is_ignored():
     bs = BookState("bybit", track_seq=True)
     bs.apply(_snap(exchange="bybit", bids=[(100.0, 1.0)], asks=[(101.0, 1.0)], seq=10))
