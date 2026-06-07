@@ -57,3 +57,15 @@ def test_invalid_params_raise():
         Detector(size_multiple=3.0, min_size=0.0, max_gap_bps=20.0, max_zone_width_bps=50.0,
                  match_overlap_bps=10.0, grace_s=0.0, window_bps=500.0,
                  persistence_target_s=-5.0, venues_target=2.0, strength_target=5.0)  # negative target
+
+
+def test_pulled_zones_are_not_in_output():
+    d = _detector()  # grace_s=0 -> immediate pulled
+    bids = [_bin(100.0, 1.0), _bin(99.5, 10.0), _bin(99.0, 1.0)]  # 99.5 support wall
+    asks = [_bin(100.5, 1.0)]
+    a1 = d.update(_snap(1.0, 100.25, bids, asks))
+    assert len(a1.supports) == 1 and abs(a1.supports[0].price - 99.5) < 1e-9
+    # next snapshot: the 99.5 wall is gone (uniform bids); mid still above it -> pulled
+    a2 = d.update(_snap(2.0, 100.25, [_bin(100.0, 1.0), _bin(99.0, 1.0)], asks))
+    assert all(not z.pulled for z in a2.supports)                 # no pulled zone leaks out
+    assert all(abs(z.price - 99.5) > 1e-6 for z in a2.supports)   # the vanished wall is gone

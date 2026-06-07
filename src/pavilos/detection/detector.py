@@ -56,7 +56,10 @@ class Detector:
         raw = cluster_walls(walls, mid=mid, max_gap_bps=self._p["max_gap_bps"],
                             max_zone_width_bps=self._p["max_zone_width_bps"])
         tracked = tracker.update(raw, mid=mid, ts=ts)
-        zones = [self._to_zone(t, mid, side) for t in tracked]
+        # Pulled (vanished) zones are NOT current supports/resistances — the
+        # tracker still surfaces them internally (anti-spoof), but they must not
+        # pollute the ranked current-zone lists.
+        zones = [self._to_zone(t, mid, side) for t in tracked if not t.pulled]
         zones.sort(key=lambda z: z.confidence, reverse=True)
         return tuple(zones)
 
