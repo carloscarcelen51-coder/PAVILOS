@@ -23,7 +23,8 @@ class SignalEngine:
         for name, v in (("entry_threshold", entry_threshold), ("trail_threshold", trail_threshold),
                         ("opposing_threshold", opposing_threshold), ("atr_stop_mult", atr_stop_mult),
                         ("opposing_distance_bps", opposing_distance_bps), ("risk_pct", risk_pct),
-                        ("max_leverage", max_leverage)):
+                        ("max_leverage", max_leverage), ("entry_offset_bps", entry_offset_bps),
+                        ("stop_offset_bps", stop_offset_bps)):
             if not (v > 0):
                 raise ValueError(f"SignalEngine: {name} must be positive, got {v}")
         self.entry_threshold = entry_threshold
@@ -49,7 +50,11 @@ class SignalEngine:
         if self.state == "PENDING_ENTRY" and pos is not None:
             self.state = "IN_POSITION"
         elif self.state == "IN_POSITION" and pos is None:
+            # position closed by the broker (stop-out) -> back to IDLE, and defer
+            # any new setup to the NEXT snapshot (no same-tick whipsaw re-entry;
+            # consistent with the discretionary-exit path, which also re-arms next tick)
             self.state, self._thesis, self._dir = "IDLE", None, None
+            return
 
         if self.state == "IDLE":
             self._maybe_enter(analysis, price, broker)

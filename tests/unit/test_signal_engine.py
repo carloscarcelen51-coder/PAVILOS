@@ -93,3 +93,37 @@ def test_ignores_non_operable_zone():
     weak = _zone(Side.SUPPORT, price=99.0, low=98.8, high=99.2, conf=0.5)  # below entry_threshold
     e.update(_analysis(1.0, mid=100.0, supports=[weak]), atr=1.0, broker=bk)
     assert e.state == "IDLE" and bk.pending_entry() is None
+
+
+def test_short_lifecycle_arm_fill_and_stop_out():
+    e, bk = _engine(), _bk()
+    res = _zone(Side.RESISTANCE, price=101.0, low=100.8, high=101.2)  # resistance above price
+    e.update(_analysis(1.0, mid=100.0, resistances=[res]), atr=1.0, broker=bk)
+    assert e.state == "PENDING_ENTRY"
+    pend = bk.pending_entry()
+    assert pend["side"] == "SHORT"
+    assert abs(pend["trigger"] - 100.0 * (1 - 2.0 / 1e4)) < 1e-9   # sell-stop just below price
+    assert abs(pend["stop"] - 101.2 * (1 + 2.0 / 1e4)) < 1e-9      # just above the resistance
+    e.update(_analysis(2.0, mid=99.0, resistances=[res]), atr=1.0, broker=bk)   # price falls -> fill
+    assert e.state == "IN_POSITION" and bk.position().side == "SHORT"
+    e.update(_analysis(3.0, mid=102.0, resistances=[res]), atr=1.0, broker=bk)  # above stop -> stop-out
+    assert e.state == "IDLE" and bk.position() is None
+
+
+def test_rejects_non_positive_offsets():
+    with pytest.raises(ValueError):
+        SignalEngine(entry_threshold=0.6, trail_threshold=0.6, opposing_threshold=0.7,
+                     min_persistence_s=5.0, min_venues=2, entry_offset_bps=2.0,
+                     stop_offset_bps=-2.0, atr_stop_mult=3.0, opposing_distance_bps=30.0,
+                     risk_pct=0.01, max_leverage=10.0)
+
+
+def test_no_same_tick_reentry_after_stop_out():
+    e, bk = _engine(), _bk()
+    sup = _zone(Side.SUPPORT, price=99.0, low=98.8, high=99.2)
+    e.update(_analysis(1.0, mid=100.0, supports=[sup]), atr=1.0, broker=bk)   # arm
+    e.update(_analysis(2.0, mid=101.0, supports=[sup]), atr=1.0, broker=bk)   # fill, stop ~98.78
+    # price collapses below stop AND a fresh lower support appears in the SAME snapshot
+    lower = _zone(Side.SUPPORT, price=97.0, low=96.8, high=97.2)
+    e.update(_analysis(3.0, mid=98.0, supports=[lower]), atr=1.0, broker=bk)  # stop-out; must NOT re-arm same tick
+    assert e.state == "IDLE" and bk.position() is None and bk.pending_entry() is None
