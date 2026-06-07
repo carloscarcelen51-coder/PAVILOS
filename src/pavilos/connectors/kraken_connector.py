@@ -87,7 +87,15 @@ class KrakenConnector:
                 self._connected = False
             if stop.is_set():
                 break
-            await self._sleep(min(backoff, self._max_backoff))
+            delay = min(backoff, self._max_backoff)
+            if delay > 0:
+                # Stop-aware backoff: wake immediately if stop is set during the wait.
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=delay)
+                except asyncio.TimeoutError:
+                    pass
+            else:
+                await self._sleep(0)  # yield (test path / no backoff)
             backoff = min(backoff * 2, self._max_backoff) if self._max_backoff else 0.0
 
     async def _default_connect(self) -> AsyncIterator[dict]:

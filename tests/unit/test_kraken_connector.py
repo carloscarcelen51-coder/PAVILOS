@@ -180,3 +180,25 @@ def test_connect_failure_increments_errors():
     u, h = _run(scenario())
     assert u.is_snapshot is True
     assert h.errors >= 1   # the OSError on the first connect was counted (and logged)
+
+
+def test_stop_interrupts_backoff_quickly():
+    # A connector with a real (positive) max_backoff whose connect always fails
+    # enters backoff; setting stop must wake it well before the backoff elapses.
+    async def always_fail():
+        raise OSError("down")
+
+    async def scenario():
+        out_q: asyncio.Queue = asyncio.Queue()
+        stop = asyncio.Event()
+        # NOTE: no injected sleep -> the stop-aware wait_for path is exercised.
+        conn = KrakenConnector("BTC/USD", connect=always_fail, now=lambda: 1.0, max_backoff=5.0)
+        task = asyncio.create_task(conn.run(out_q, stop))
+        await asyncio.sleep(0.05)        # let it fail once and enter the ~1s backoff
+        stop.set()
+        # Without stop-aware backoff this would block ~1s; with it, it returns fast.
+        await asyncio.wait_for(task, timeout=0.5)
+        return conn.health()
+
+    h = _run(scenario())
+    assert h.errors >= 1
