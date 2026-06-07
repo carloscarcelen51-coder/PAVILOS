@@ -104,7 +104,9 @@ class BinanceConnector:
         return gen()
 
     async def _default_fetch_snapshot(self) -> dict:
-        params = {"symbol": self.symbol, "limit": 5000}
+        # Binance REST /api/v3/depth requires an UPPERCASE symbol (rejects
+        # lowercase with -1121); the WS stream path uses lowercase. Normalize.
+        params = {"symbol": self.symbol.upper(), "limit": 5000}
         async with aiohttp.ClientSession() as session:
             async with session.get(self._rest_url, params=params, proxy=self._proxy) as resp:
                 resp.raise_for_status()
