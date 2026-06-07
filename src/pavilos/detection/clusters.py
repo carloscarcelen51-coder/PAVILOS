@@ -19,16 +19,22 @@ class RawZone:
     venues: tuple[str, ...]
 
 
-def cluster_walls(walls, *, mid: float, max_gap_bps: float) -> list[RawZone]:
-    """Cluster walls whose adjacent price gap is within ``max_gap_bps`` (relative
-    to ``mid``) into single zones. Returns zones sorted by price descending."""
+def cluster_walls(walls, *, mid: float, max_gap_bps: float, max_zone_width_bps: float) -> list[RawZone]:
+    """Cluster walls whose adjacent price gap is within ``max_gap_bps`` AND whose
+    total span (from the group's highest price) stays within ``max_zone_width_bps``
+    (both relative to ``mid``) into single zones. The width cap prevents a long
+    staircase of walls from collapsing into one unbounded zone. Returns zones
+    sorted by price descending."""
     if not walls:
         return []
     ordered = sorted(walls, key=lambda w: w.bin.price, reverse=True)
     max_gap = mid * max_gap_bps / 1e4
+    max_width = mid * max_zone_width_bps / 1e4
     groups: list[list[WallBin]] = [[ordered[0]]]
     for w in ordered[1:]:
-        if groups[-1][-1].bin.price - w.bin.price <= max_gap:
+        prev_price = groups[-1][-1].bin.price
+        head_price = groups[-1][0].bin.price   # highest price in the group (sorted desc)
+        if prev_price - w.bin.price <= max_gap and head_price - w.bin.price <= max_width:
             groups[-1].append(w)
         else:
             groups.append([w])
