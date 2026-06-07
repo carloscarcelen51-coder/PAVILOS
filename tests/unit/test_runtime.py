@@ -66,6 +66,31 @@ def test_observer_error_does_not_propagate_out_of_process():
     rt.trading_engine.process(snap)
 
 
+def test_runtime_loads_history_and_publishes_summary(tmp_path):
+    from pavilos.execution.broker import Trade
+    from pavilos.execution.trade_log import TradeLog
+    from pavilos.core.runtime import Runtime, RuntimeConfig
+    p = tmp_path / "trades.jsonl"
+    TradeLog(str(p)).append(Trade("LONG", 1.0, 100.0, 110.0, 1.0, 2.0, 10.0, 0.0, 10.0, "close"))
+
+    class _FakeConnector:
+        def __init__(self, ex): self.exchange = ex
+        async def run(self, out_q, stop): await stop.wait()
+        def health(self):
+            from pavilos.connectors.base import ConnectorHealth
+            return ConnectorHealth(self.exchange, True, 0.0, 0, 0)
+
+    rt = Runtime.build(RuntimeConfig(trade_log_path=str(p)),
+                       connector_factory=lambda v, sym: _FakeConnector(v))
+    # a new trade closed this session is appended to the log AND the in-memory all-time list
+    rt.trading_engine.broker.place_entry("LONG", trigger=100.0, stop=98.0, size=1.0)
+    rt.trading_engine.broker.on_price(100.0, ts=5.0)
+    rt.trading_engine.broker.on_price(105.0, ts=6.0)
+    rt.trading_engine.broker.close(ts=7.0)
+    assert len(TradeLog(str(p)).load()) == 2          # history (1) + this session (1) persisted
+    assert len(rt.all_trades) == 2
+
+
 def test_supervisor_restarts_a_crashing_trading_loop():
     rt = Runtime.build(RuntimeConfig(), connector_factory=lambda v, sym: _FakeConnector(v))
     calls = {"n": 0}

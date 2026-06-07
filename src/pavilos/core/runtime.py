@@ -17,6 +17,7 @@ from pavilos.detection.detector import Detector
 from pavilos.signals.atr import ATR
 from pavilos.signals.engine import SignalEngine
 from pavilos.execution.broker import PaperBroker
+from pavilos.execution.trade_log import TradeLog, summarize
 from pavilos.core.trading_engine import TradingEngine
 from pavilos.web.state import DashboardState
 
@@ -35,6 +36,7 @@ def _wall_now() -> float:
 class RuntimeConfig:
     symbols: dict = field(default_factory=lambda: dict(_SYMBOLS))
     starting_equity: float = 10_000.0
+    trade_log_path: str = "paper_trades.jsonl"
     bin_bps: float = 5.0
     window_bps: float = 50.0
     staleness_s: float = 15.0
@@ -68,11 +70,14 @@ class RuntimeConfig:
 
 class Runtime:
     def __init__(self, engine: Engine, trading_engine: TradingEngine,
-                 state: DashboardState, config: RuntimeConfig) -> None:
+                 state: DashboardState, config: RuntimeConfig,
+                 all_trades, trade_log) -> None:
         self.engine = engine
         self.trading_engine = trading_engine
         self.state = state
         self.config = config
+        self.all_trades = all_trades
+        self.trade_log = trade_log
 
     @classmethod
     def build(cls, config: RuntimeConfig, *,
@@ -93,7 +98,14 @@ class Runtime:
                               stop_offset_bps=config.stop_offset_bps, atr_stop_mult=config.atr_stop_mult,
                               opposing_distance_bps=config.opposing_distance_bps, risk_pct=config.risk_pct,
                               max_leverage=config.max_leverage)
-        broker = PaperBroker(starting_equity=config.starting_equity)
+        trade_log = TradeLog(config.trade_log_path)
+        all_trades = trade_log.load()
+
+        def _on_trade(t) -> None:
+            trade_log.append(t)
+            all_trades.append(t)
+
+        broker = PaperBroker(starting_equity=config.starting_equity, on_trade=_on_trade)
         state = DashboardState()
 
         def observer(snapshot, analysis, brk) -> None:
@@ -101,10 +113,12 @@ class Runtime:
             # measures actual feed lag and the dashboard stale flag is meaningful;
             # passing now=analysis.ts would make the difference always 0.
             state.update(analysis, brk, engine.health(), engine_state=signal.state,
-                         now=now(), staleness_s=config.staleness_s)
+                         now=now(), staleness_s=config.staleness_s,
+                         trades=all_trades[-50:],
+                         summary=summarize(all_trades, base_equity=config.starting_equity))
 
         trading_engine = TradingEngine(detector, ATR(window=config.atr_window), signal, broker, observer=observer)
-        return cls(engine, trading_engine, state, config)
+        return cls(engine, trading_engine, state, config, all_trades, trade_log)
 
     async def _supervise_trading(self, stop: "asyncio.Event", *, restart_delay: float = 1.0) -> None:
         """Run TradingEngine.run; on a crash-loud exception, log and restart until stop."""
