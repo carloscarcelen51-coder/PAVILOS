@@ -31,9 +31,13 @@ class OKXFeed:
         prev = data.get("prevSeqId")
         is_snapshot = action == "snapshot"
         if not is_snapshot:
-            if seq_id is not None and prev is not None and seq_id < prev:
+            if self._last_seq is None:
+                raise ResyncRequired("okx: update before snapshot")
+            if seq_id is None or prev is None:
+                raise ResyncRequired(f"okx: update missing seqId/prevSeqId (seqId={seq_id}, prevSeqId={prev})")
+            if seq_id < prev:
                 raise ResyncRequired(f"okx seqId reset: seqId={seq_id} < prevSeqId={prev}")
-            if self._last_seq is not None and prev is not None and prev != -1 and prev != self._last_seq:
+            if prev != self._last_seq:
                 raise ResyncRequired(f"okx seqId gap: prevSeqId={prev} != last={self._last_seq}")
         if seq_id is not None:
             self._last_seq = seq_id
