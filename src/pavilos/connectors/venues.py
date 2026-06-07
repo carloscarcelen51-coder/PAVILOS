@@ -30,7 +30,7 @@ VENUE_SPECS: tuple[VenueSpec, ...] = (
 
 def _coinbase_connect(symbol: str):
     async def connect() -> AsyncIterator[dict]:
-        ws = await websockets.connect("wss://advanced-trade-ws.coinbase.com")
+        ws = await websockets.connect("wss://advanced-trade-ws.coinbase.com", max_size=None)
         await ws.send(json.dumps({"type": "subscribe", "product_ids": [symbol], "channel": "level2"}))
         await ws.send(json.dumps({"type": "subscribe", "product_ids": [symbol], "channel": "heartbeats"}))
 
@@ -46,7 +46,7 @@ def _coinbase_connect(symbol: str):
 
 def _okx_connect(symbol: str):
     async def connect() -> AsyncIterator[dict]:
-        ws = await websockets.connect("wss://ws.okx.com:8443/ws/v5/public")
+        ws = await websockets.connect("wss://ws.okx.com:8443/ws/v5/public", max_size=None)
         await ws.send(json.dumps({"op": "subscribe", "args": [{"channel": "books", "instId": symbol}]}))
 
         async def gen() -> AsyncIterator[dict]:
@@ -63,7 +63,7 @@ def _okx_connect(symbol: str):
 
 def _bybit_connect(symbol: str):
     async def connect() -> AsyncIterator[dict]:
-        ws = await websockets.connect("wss://stream.bybit.com/v5/public/spot")
+        ws = await websockets.connect("wss://stream.bybit.com/v5/public/spot", max_size=None)
         await ws.send(json.dumps({"op": "subscribe", "args": [f"orderbook.200.{symbol}"]}))
 
         async def gen() -> AsyncIterator[dict]:

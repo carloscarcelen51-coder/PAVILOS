@@ -100,7 +100,7 @@ class BinanceConnector:
 
     async def _default_connect(self) -> AsyncIterator[dict]:
         stream_url = f"{self._url}/{self.symbol.lower()}@depth@100ms"
-        ws = await websockets.connect(stream_url, proxy=self._proxy) if self._proxy else await websockets.connect(stream_url)
+        ws = await websockets.connect(stream_url, proxy=self._proxy, max_size=None) if self._proxy else await websockets.connect(stream_url, max_size=None)
 
         async def gen() -> AsyncIterator[dict]:
             try:

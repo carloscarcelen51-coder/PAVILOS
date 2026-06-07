@@ -99,7 +99,7 @@ class KrakenConnector:
             backoff = min(backoff * 2, self._max_backoff) if self._max_backoff else 0.0
 
     async def _default_connect(self) -> AsyncIterator[dict]:
-        ws = await websockets.connect(self._url, proxy=self._proxy) if self._proxy else await websockets.connect(self._url)
+        ws = await websockets.connect(self._url, proxy=self._proxy, max_size=None) if self._proxy else await websockets.connect(self._url, max_size=None)
         await ws.send(json.dumps({
             "method": "subscribe",
             "params": {"channel": "book", "symbol": [self.symbol], "depth": self._depth},
