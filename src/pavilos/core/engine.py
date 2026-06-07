@@ -42,10 +42,17 @@ class Engine:
                                  interval_s=self._interval_s, now=self._now, stop=self._stop)
         ))
 
-    async def stop(self) -> None:
+    async def stop(self, *, grace: float = 2.0) -> None:
         self._stop.set()
         if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+            # Give tasks a grace period to exit cleanly, then force-cancel any
+            # stragglers (e.g. a connector wedged in a dead connect/read) so
+            # shutdown is bounded regardless of connector state.
+            _, pending = await asyncio.wait(self._tasks, timeout=grace)
+            for t in pending:
+                t.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
         self._tasks.clear()
 
     def health(self) -> list[ConnectorHealth]:

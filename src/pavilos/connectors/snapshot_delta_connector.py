@@ -13,6 +13,16 @@ from pavilos.connectors.base import ConnectorHealth, ResyncRequired
 _log = logging.getLogger(__name__)
 
 
+async def _aclose(stream: object) -> None:
+    """Best-effort close of an async-iterator stream (idempotent, never raises)."""
+    aclose = getattr(stream, "aclose", None)
+    if aclose is not None:
+        try:
+            await aclose()
+        except Exception:
+            pass
+
+
 class SnapshotDeltaConnector:
     """Streams a venue's snapshot+delta frames through a per-venue feed into
     ``BookUpdate``s. ``make_feed`` is a zero-arg factory; a FRESH feed is created
@@ -46,8 +56,9 @@ class SnapshotDeltaConnector:
     async def run(self, out_q: "asyncio.Queue[BookUpdate]", stop: "asyncio.Event") -> None:
         backoff = 1.0
         while not stop.is_set():
-            feed = self._make_feed()
+            stream = None
             try:
+                feed = self._make_feed()
                 stream = await self._connect()
                 self._connected = True
                 async for msg in stream:
@@ -65,6 +76,7 @@ class SnapshotDeltaConnector:
                 _log.exception("%s connector error; will reconnect", self.exchange)
             finally:
                 self._connected = False
+                await _aclose(stream)
             if stop.is_set():
                 break
             delay = min(backoff, self._max_backoff)

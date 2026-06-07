@@ -86,3 +86,62 @@ def test_connect_failure_increments_errors():
     u, h = _run(scenario())
     assert u.is_snapshot is True
     assert h.errors >= 1
+
+
+def test_make_feed_failure_is_counted_and_retried():
+    calls = {"n": 0}
+
+    def make_feed():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("feed factory boom")
+        return _FakeFeed()
+
+    async def fake_connect():
+        async def gen():
+            yield {"p": 100.0, "s": 1.0, "snap": True, "seq": 1}
+        return gen()
+
+    async def scenario():
+        out_q: asyncio.Queue = asyncio.Queue()
+        stop = asyncio.Event()
+        conn = SnapshotDeltaConnector("fake", make_feed, connect=fake_connect, now=lambda: 1.0,
+                                      sleep=lambda d: asyncio.sleep(0), max_backoff=0.0)
+        task = asyncio.create_task(conn.run(out_q, stop))
+        u = await asyncio.wait_for(out_q.get(), timeout=1.0)  # recovers on 2nd make_feed
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+        return u, conn.health()
+
+    u, h = _run(scenario())
+    assert u.is_snapshot is True
+    assert h.errors >= 1   # the feed-factory failure was counted, not fatal
+
+
+def test_stream_is_aclosed_on_stop():
+    closed = {"n": 0}
+
+    class _ClosingStream:
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            await asyncio.sleep(0)  # yield to the loop so stop can be observed
+            return {"p": 100.0, "s": 1.0, "snap": True, "seq": 1}  # endless
+        async def aclose(self):
+            closed["n"] += 1
+
+    async def fake_connect():
+        return _ClosingStream()
+
+    async def scenario():
+        out_q: asyncio.Queue = asyncio.Queue()
+        stop = asyncio.Event()
+        conn = SnapshotDeltaConnector("fake", _FakeFeed, connect=fake_connect, now=lambda: 1.0,
+                                      sleep=lambda d: asyncio.sleep(0), max_backoff=0.0)
+        task = asyncio.create_task(conn.run(out_q, stop))
+        await asyncio.wait_for(out_q.get(), timeout=1.0)
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+        return closed["n"]
+
+    assert _run(scenario()) >= 1   # stream.aclose() was called on shutdown

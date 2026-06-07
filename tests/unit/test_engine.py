@@ -42,3 +42,25 @@ def test_engine_produces_combined_snapshot_from_connectors():
     assert snap is not None
     assert set(snap.venues_active) == {"kraken", "binance"}
     assert snap.mid == 100.5
+
+
+def test_engine_stop_cancels_a_wedged_connector():
+    # A connector that never observes stop must NOT hang Engine.stop().
+    from pavilos.core.models import VenueSpec, Quote, Tier
+    from pavilos.aggregator.normalize import PegProvider
+    from pavilos.aggregator.aggregator import Aggregator
+
+    class _HangConnector:
+        exchange = "hang"
+        async def run(self, out_q, stop):
+            await asyncio.Event().wait()  # never returns; ignores stop
+
+    async def scenario():
+        specs = [VenueSpec("kraken", Quote.USD, Tier.A)]
+        agg = Aggregator(specs, PegProvider(), bin_bps=100.0, window_bps=200.0, staleness_s=60.0)
+        engine = Engine([_HangConnector()], agg, interval_s=0.0, now=lambda: 1.0)
+        await engine.start()
+        await asyncio.wait_for(engine.stop(grace=0.05), timeout=2.0)  # must NOT hang
+        return True
+
+    assert asyncio.run(scenario()) is True
