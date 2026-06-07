@@ -60,9 +60,9 @@ class BitstampConnector:
     async def run(self, out_q: "asyncio.Queue[BookUpdate]", stop: "asyncio.Event") -> None:
         backoff = 1.0
         while not stop.is_set():
-            feed = BitstampDepthFeed(self.symbol, exchange=self.exchange)
             stream = None
             try:
+                feed = BitstampDepthFeed(self.symbol, exchange=self.exchange)
                 stream = await self._connect()          # open first so diffs buffer
                 self._connected = True
                 snapshot = await self._fetch_snapshot()
