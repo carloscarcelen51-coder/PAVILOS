@@ -818,3 +818,49 @@ class TradingEngine:
 **Calibration note:** all thresholds/offsets/risk params are constructor-injected; production VALUES need calibration (entry/trail/opposing thresholds, offsets, ATR mult, risk_pct). Tests pin the LOGIC (arms above support, cancels on vanish, fills→position, trails up & ATR-floored, exits on opposing wall, stop-out→IDLE, sizing risk+cap), not calibrated numbers.
 
 **Adversarial focus (3rd barrier):** double-fill on a single price tick (entry+stop same tick?); cancel racing a fill within `update`; stop trailing the WRONG direction (must only tighten toward price, never loosen); equity conservation across entry→trail→close (no drift); state stuck after stop-out; funding sign (long pays, short receives) + multi-hour gaps; sizing never exceeds `max_leverage*equity/entry`; a snapshot with both an operable support and resistance (pick best, only one position); `on_price` non-finite guard; `place_entry` rejecting a second position; trigger crossed by a gap (fills at trigger, not the gapped price — slippage noted as deferred).
+
+---
+
+## Implementation notes (2026-06-07, shipped deviations)
+
+These notes record where the shipped code intentionally diverges from the plan
+draft above. The embedded code blocks earlier in this plan are kept verbatim as
+the original draft; the bullets below are the source of truth for what shipped.
+
+- **Entry geometry is MOMENTUM, not the draft's support.high trigger.** The
+  shipped `SignalEngine._maybe_enter` arms a *breakout* in the trade direction:
+  a LONG arms a buy-stop just ABOVE the current price at
+  `price * (1 + entry_offset_bps / 1e4)`, with the protective stop below the
+  detected support at `support.low * (1 - stop_offset_bps / 1e4)`; a SHORT is
+  mirrored (sell-stop just BELOW price at `price * (1 - entry_offset_bps / 1e4)`,
+  stop above the resistance at `resistance.high * (1 + stop_offset_bps / 1e4)`).
+  The plan-draft's `support.high`-based trigger sat *below* the current price and
+  would have instant-filled on arming, so it was replaced.
+- **Offsets are validated positive.** The constructor rejects non-positive
+  `entry_offset_bps` / `stop_offset_bps` (alongside the other tunables), so the
+  trigger is always strictly above (LONG) / below (SHORT) the price and the stop
+  always sits on the protective side of the zone.
+- **Re-arm is deferred one tick after a stop-out.** When the broker closes a
+  position, `update` returns to IDLE and waits for the NEXT snapshot before
+  considering a new setup (no same-tick whipsaw re-entry), matching the
+  discretionary-exit path.
+- **The PaperBroker fills at the breaching market price.** Entry and stop orders
+  fill at the price of the tick that triggers them, so a gap-through is modelled
+  honestly and a stop never fills optimistically (no best-case stop price).
+- **The T5 test uses a persistence warm-up snapshot.** A freshly-seen zone has
+  `persistence_s == 0` and therefore `confidence == 0` on its first sighting, so
+  it cannot clear `entry_threshold` on the first snapshot. The `TradingEngine`
+  test feeds an identical warm-up snapshot first so the support persists and
+  arms on the second snapshot.
+
+**Close-out hardening (2026-06-07 barrier review):** `TradingEngine.run` now
+honours `stop` while idle — it races `snapshots.get()` against `stop.wait()`
+(FIRST_COMPLETED) so an empty queue still wakes the loop on shutdown, mirroring
+`Aggregator.run`'s bounded-shutdown contract; on a stop/arrival race the
+in-flight snapshot is processed rather than dropped. The loop is documented as
+crash-loud (a per-tick exception propagates out for an awaiting supervisor to
+surface). The constructor argument order is `(detector, atr, signal, broker)` to
+mirror the `detect -> atr -> signal` pipeline, and the class carries a docstring
+and a `broker: PaperBroker` type hint consistent with its collaborators.
+`position_size` also returns `0.0` when the computed size or leverage cap is
+non-finite (overflow guard).

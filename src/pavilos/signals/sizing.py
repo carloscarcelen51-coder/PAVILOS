@@ -19,4 +19,6 @@ def position_size(equity: float, *, entry: float, stop: float,
         return 0.0
     size = (equity * risk_pct) / risk_per_unit
     max_size = max_leverage * equity / entry
+    if not (math.isfinite(size) and math.isfinite(max_size)):
+        return 0.0
     return max(0.0, min(size, max_size))

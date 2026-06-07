@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from pavilos.core.models import DepthBin, CombinedDepthSnapshot
 from pavilos.detection.detector import Detector
 from pavilos.execution.broker import PaperBroker
@@ -26,7 +28,7 @@ def _components():
                           stop_offset_bps=2.0, atr_stop_mult=3.0, opposing_distance_bps=30.0,
                           risk_pct=0.01, max_leverage=10.0)
     broker = PaperBroker(starting_equity=10_000.0, taker_fee=0.0, maker_fee=0.0, funding_rate_hourly=0.0)
-    return TradingEngine(detector, signal, broker, ATR(window=10))
+    return TradingEngine(detector, ATR(window=10), signal, broker)
 
 
 _BIDS = [_bin(100.0, 1.0), _bin(99.0, 10.0), _bin(98.0, 1.0)]   # support wall ~99 (below mid 99.5)
@@ -57,8 +59,49 @@ def test_run_consumes_queue_until_stop():
                 break
             await asyncio.sleep(0)
         stop.set()
-        await q.put(_snap(4.0, 102.0, _BIDS, _ASKS))  # unblock the queue.get so run() observes stop
+        # No sentinel needed: run() races get() against stop.wait(), so it
+        # observes stop and returns even with the queue now idle.
         await asyncio.wait_for(task, timeout=1.0)
         return te.broker.position()
 
     assert asyncio.run(scenario()) is not None
+
+
+def test_run_returns_on_stop_with_empty_queue():
+    # Important-defect regression: stop set while idle on an EMPTY queue must
+    # wake run() promptly, without anyone feeding a sentinel snapshot.
+    te = _components()
+
+    async def scenario():
+        q: asyncio.Queue = asyncio.Queue()
+        stop = asyncio.Event()
+        task = asyncio.create_task(te.run(q, stop))
+        await asyncio.sleep(0)            # let run() block on the empty queue
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)  # must NOT wedge
+        return task.done()
+
+    assert asyncio.run(scenario()) is True
+
+
+def test_run_is_crash_loud_on_pipeline_exception():
+    # Important-defect contract: a per-tick exception propagates out of run()
+    # (crash-loud) so a supervisor awaiting the task observes it, rather than
+    # the failure being swallowed.
+    te = _components()
+    boom = RuntimeError("poisoned tick")
+
+    def explode(_snapshot):
+        raise boom
+
+    te.process = explode  # type: ignore[method-assign]
+
+    async def scenario():
+        q: asyncio.Queue = asyncio.Queue()
+        stop = asyncio.Event()
+        await q.put(_snap(1.0, 99.5, _BIDS, _ASKS))
+        task = asyncio.create_task(te.run(q, stop))
+        with pytest.raises(RuntimeError, match="poisoned tick"):
+            await asyncio.wait_for(task, timeout=1.0)
+
+    asyncio.run(scenario())

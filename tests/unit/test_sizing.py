@@ -18,3 +18,9 @@ def test_size_capped_by_leverage():
 def test_zero_or_inverted_distance_returns_zero():
     assert position_size(10_000.0, entry=100.0, stop=100.0, risk_pct=0.01, max_leverage=10.0) == 0.0
     assert position_size(10_000.0, entry=100.0, stop=float("nan"), risk_pct=0.01, max_leverage=10.0) == 0.0
+
+
+def test_overflow_returns_zero():
+    import sys
+    huge = sys.float_info.max
+    assert position_size(huge, entry=0.5, stop=0.4, risk_pct=10.0, max_leverage=2.0) == 0.0
