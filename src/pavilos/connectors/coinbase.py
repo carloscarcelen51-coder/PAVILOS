@@ -35,10 +35,13 @@ class CoinbaseFeed:
             for upd in event.get("updates", []):
                 price = float(upd["price_level"])
                 size = float(upd["new_quantity"])
-                if upd["side"] == "bid":
+                side = upd["side"]
+                if side == "bid":
                     bids.append((price, size))
-                else:  # "offer"
+                elif side == "offer":
                     asks.append((price, size))
+                else:
+                    raise ResyncRequired(f"coinbase: unexpected side {side!r}")
         if seq is not None:
             self._last_seq = seq
         return BookUpdate(exchange=self.exchange, ts=ts, bids=tuple(bids), asks=tuple(asks),

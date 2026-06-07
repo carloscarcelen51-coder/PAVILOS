@@ -45,3 +45,11 @@ def test_duplicate_or_out_of_order_sequence_ignored():
     assert feed.process(_msg("update", 9, [_u("bid", "1.0", "1.0")]), ts=2.0) is None   # <= last
     upd = feed.process(_msg("update", 11, [_u("bid", "100.0", "2.0")]), ts=3.0)         # contiguous
     assert upd is not None and upd.seq == 11
+
+
+def test_unexpected_side_raises_resync():
+    feed = CoinbaseFeed()
+    # any side other than bid/offer must fail loud (-> reconnect), not silently
+    # mis-file as an ask and corrupt the book.
+    with pytest.raises(ResyncRequired):
+        feed.process(_msg("snapshot", 0, [_u("sell", "100.0", "1.0")]), ts=1.0)
