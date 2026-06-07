@@ -14,8 +14,15 @@ def _levels(rows: list[list[str]]) -> tuple[tuple[float, float], ...]:
 class BitstampDepthFeed:
     """Seeds from a REST order_book snapshot, then applies WS diffs, dropping any
     diff whose ``microtimestamp`` is <= the current watermark. Sizes absolute;
-    amount ``"0"`` removes. Gaps cannot be detected from the microtimestamp alone,
-    so the transport drives resync on ``bts:request_reconnect`` / crossed book."""
+    amount ``"0"`` removes.
+
+    INHERENT LIMITATION: Bitstamp's diff channel carries no sequence number and
+    no checksum, so a silently dropped intermediate diff is NOT detectable from
+    the microtimestamp stream alone (a later microtimestamp is always "valid").
+    The connector recovers on an explicit ``bts:request_reconnect`` (handled in
+    ``BitstampConnector``), but there is currently NO crossed-book / staleness
+    detector — adding one (best_bid >= best_ask -> re-seed) is a deferred
+    aggregator-level enhancement, since the assembled book lives in BookState."""
 
     def __init__(self, symbol: str = "btcusd", *, exchange: str = "bitstamp") -> None:
         self.symbol = symbol
