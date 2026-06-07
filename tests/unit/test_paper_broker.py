@@ -25,10 +25,10 @@ def test_long_stop_out_realizes_loss_and_clears_position():
     bk = _bk()
     bk.place_entry("LONG", trigger=100.0, stop=98.0, size=2.0)
     bk.on_price(100.0, ts=1.0)            # fill
-    bk.on_price(97.0, ts=2.0)            # below stop -> stop fills at stop=98.0
+    bk.on_price(97.0, ts=2.0)            # below stop -> fills at the breaching price 97
     assert bk.position() is None
-    # pnl = 2*(98-100) = -4.0 ; entry fee 0.10 ; exit fee 2*98*0.0005=0.098
-    assert abs(bk.equity() - (10_000.0 - 4.0 - 0.10 - 0.098)) < 1e-9
+    # pnl = 2*(97-100) = -6.0 ; entry fee 0.10 ; exit fee 2*97*0.0005=0.097
+    assert abs(bk.equity() - (10_000.0 - 6.0 - 0.10 - 0.097)) < 1e-9
 
 
 def test_short_entry_and_stop_are_mirrored():
@@ -38,10 +38,10 @@ def test_short_entry_and_stop_are_mirrored():
     assert bk.position() is None
     bk.on_price(100.0, ts=1.0)           # touches trigger -> short fills
     assert bk.position().side == "SHORT"
-    bk.on_price(103.0, ts=2.0)           # above stop -> stop fills at 102.0
+    bk.on_price(103.0, ts=2.0)           # above stop -> fills at the breaching price 103
     assert bk.position() is None
-    # pnl = 1*(100-102) = -2.0 ; fees 1*100*.0005 + 1*102*.0005
-    assert abs(bk.equity() - (10_000.0 - 2.0 - 0.05 - 0.051)) < 1e-9
+    # pnl = 1*(100-103) = -3.0 ; fees 1*100*.0005 + 1*103*.0005
+    assert abs(bk.equity() - (10_000.0 - 3.0 - 0.05 - 0.0515)) < 1e-9
 
 
 def test_cancel_entry_clears_pending():
@@ -74,3 +74,29 @@ def test_funding_charged_hourly_to_longs():
     bk.on_price(100.0, ts=0.0)           # fill at t=0
     bk.on_price(100.0, ts=3600.0)        # +1h -> funding = notional*rate = 100*0.0001 = 0.01
     assert abs(bk.equity() - (10_000.0 - 0.01)) < 1e-9
+
+
+def test_stop_fills_at_gap_price_not_optimistically():
+    bk = _bk()
+    bk.place_entry("LONG", trigger=100.0, stop=98.0, size=2.0)
+    bk.on_price(100.0, ts=1.0)            # fill @100
+    bk.on_price(90.0, ts=2.0)            # GAP through the stop -> fills at 90, not 98
+    assert bk.position() is None
+    # pnl = 2*(90-100) = -20.0 ; entry fee 0.10 ; exit fee 2*90*0.0005=0.09
+    assert abs(bk.equity() - (10_000.0 - 20.0 - 0.10 - 0.09)) < 1e-9
+
+
+def test_place_entry_rejects_stop_on_wrong_side():
+    import pytest
+    bk = _bk()
+    with pytest.raises(ValueError):
+        bk.place_entry("LONG", trigger=100.0, stop=101.0, size=1.0)   # stop above trigger
+    with pytest.raises(ValueError):
+        bk.place_entry("SHORT", trigger=100.0, stop=99.0, size=1.0)   # stop below trigger
+
+
+def test_place_entry_rejects_non_finite_levels():
+    import pytest
+    bk = _bk()
+    with pytest.raises(ValueError):
+        bk.place_entry("LONG", trigger=100.0, stop=float("nan"), size=1.0)

@@ -1,6 +1,8 @@
 # src/pavilos/execution/broker.py
 """Paper broker for a linear USD perp (Kraken PF_XBTUSD model). Driven by
-on_price(price, ts); no network. Entry/stop orders fill at their trigger price."""
+on_price(price, ts); no network. Entry and stop orders fill at the breaching
+market price (the tick that triggers them), so gap-through is modelled and stops
+never fill optimistically."""
 from __future__ import annotations
 
 import math
@@ -53,6 +55,12 @@ class PaperBroker:
             raise RuntimeError("broker already has a position or pending entry")
         if size <= 0:
             raise ValueError("size must be positive")
+        if not (math.isfinite(trigger) and math.isfinite(stop)):
+            raise ValueError("trigger and stop must be finite")
+        if side == "LONG" and not (stop < trigger):
+            raise ValueError("LONG stop must be below trigger")
+        if side == "SHORT" and not (stop > trigger):
+            raise ValueError("SHORT stop must be above trigger")
         self._pending = {"side": side, "trigger": trigger, "stop": stop, "size": size}
 
     def cancel_entry(self) -> None:
@@ -77,13 +85,13 @@ class PaperBroker:
             d = self._pending
             triggered = price >= d["trigger"] if d["side"] == "LONG" else price <= d["trigger"]
             if triggered:
-                self._open(d["side"], d["trigger"], d["stop"], d["size"], ts)
+                self._open(d["side"], price, d["stop"], d["size"], ts)
                 self._pending = None
         if self._position is not None:
             p = self._position
             hit = price <= p.stop if p.side == "LONG" else price >= p.stop
             if hit:
-                self._close_at(p.stop, ts, "stop")
+                self._close_at(price, ts, "stop")
         self._last_price = price
 
     # --- queries ----------------------------------------------------------
