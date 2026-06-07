@@ -6,7 +6,9 @@ from pavilos.detection.lifecycle import TrackedZone
 
 
 def _clamp01(x: float) -> float:
-    return 0.0 if x < 0.0 else 1.0 if x > 1.0 else x
+    # NaN-safe: ``not (x > 0.0)`` is True for NaN and for x <= 0 -> 0.0, so a
+    # non-finite factor can never escape the [0,1] contract (it ranks last).
+    return 0.0 if not (x > 0.0) else (1.0 if x > 1.0 else x)
 
 
 def score_zone(

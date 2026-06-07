@@ -36,3 +36,13 @@ def test_single_venue_scores_lower_than_multi_venue():
     one = score_zone(_tracked(venues=("kraken",)), mid=100.5, **_PARAMS)
     many = score_zone(_tracked(venues=("kraken", "binance", "coinbase")), mid=100.5, **_PARAMS)
     assert one < many
+
+
+def test_non_finite_inputs_score_zero_not_nan():
+    # A NaN/inf in price/strength/persistence must not escape the [0,1] contract.
+    import math
+    for bad in (float("nan"), float("inf")):
+        rz = RawZone(low=99.5, high=100.5, price=bad, strength=10.0, venues=("kraken",))
+        t = TrackedZone(rz, first_seen=0.0, persistence_s=10.0, pulled=False)
+        s = score_zone(t, mid=100.0, **_PARAMS)
+        assert math.isfinite(s) and 0.0 <= s <= 1.0
