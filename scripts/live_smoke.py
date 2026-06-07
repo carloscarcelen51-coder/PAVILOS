@@ -1,6 +1,6 @@
 # scripts/live_smoke.py
-"""MANUAL live smoke (uses the network): run Kraken+Binance through the Engine
-for a few seconds and print the combined book + health. Not a pytest test.
+"""MANUAL live smoke (uses the network): run all six Tier-A venues through the
+Engine for a few seconds and print the combined book + health. Not a pytest test.
 
 Usage: python -m scripts.live_smoke [seconds]
 """
@@ -13,14 +13,15 @@ from pavilos.core.models import VenueSpec, Quote, Tier
 from pavilos.aggregator.normalize import PegProvider
 from pavilos.aggregator.aggregator import Aggregator
 from pavilos.core.engine import Engine
-from pavilos.connectors.kraken_connector import KrakenConnector
-from pavilos.connectors.binance_connector import BinanceConnector
 
 
 async def main(seconds: float) -> int:
-    specs = [VenueSpec("kraken", Quote.USD, Tier.A), VenueSpec("binance", Quote.USDT, Tier.A)]
+    from pavilos.connectors.venues import VENUE_SPECS, build_connector
+    symbols = {"kraken": "BTC/USD", "binance": "BTCUSDT", "coinbase": "BTC-USD",
+               "okx": "BTC-USDT", "bybit": "BTCUSDT", "bitstamp": "btcusd"}
+    specs = list(VENUE_SPECS)
     agg = Aggregator(specs, PegProvider(), bin_bps=5.0, window_bps=50.0, staleness_s=15.0)
-    connectors = [KrakenConnector("BTC/USD", depth=25), BinanceConnector("BTCUSDT")]
+    connectors = [build_connector(v, symbols[v]) for v in symbols]
     engine = Engine(connectors, agg, interval_s=1.0)
     await engine.start()
     try:
