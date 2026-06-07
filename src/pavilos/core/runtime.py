@@ -102,8 +102,18 @@ class Runtime:
         all_trades = trade_log.load()
 
         def _on_trade(t) -> None:
-            trade_log.append(t)
-            all_trades.append(t)
+            # A disk/IO failure must NEVER crash trading or strand the broker.
+            # Keep the in-memory all-time record first (persistence-independent),
+            # then attempt the durable append; swallow+log any I/O failure so a
+            # transient disk fault can't propagate out of broker.close()/on_price().
+            try:
+                all_trades.append(t)
+            except Exception:
+                _log.exception("failed to record trade in memory")
+            try:
+                trade_log.append(t)
+            except Exception:
+                _log.exception("failed to persist trade to %s", config.trade_log_path)
 
         broker = PaperBroker(starting_equity=config.starting_equity, on_trade=_on_trade)
         state = DashboardState()

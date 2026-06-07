@@ -21,6 +21,7 @@ build/
 *.log
 
 # --- Data / runtime artifacts (never commit market data or secrets) ---
+paper_trades.jsonl
 data/
 *.parquet
 *.duckdb

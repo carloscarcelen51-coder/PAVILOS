@@ -5,8 +5,11 @@ market price (the tick that triggers them), so gap-through is modelled and stops
 never fill optimistically."""
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True, frozen=True)
@@ -158,10 +161,18 @@ class PaperBroker:
                       entry_ts=self._entry_ts, exit_ts=ts, pnl=net, fee=self._entry_fee + exit_fee,
                       return_pct=(net / notional * 100.0) if notional else 0.0, reason=kind)
         self._trades.append(trade)
-        if self._on_trade is not None:
-            self._on_trade(trade)
+        # Close atomically BEFORE notifying: clear position state first so a failing
+        # on_trade callback (e.g. disk error during persistence) can neither leave a
+        # ghost position nor over-count equity on a subsequent re-close. The callback
+        # is best-effort telemetry — isolate it so it can never propagate out of the
+        # price-driven trading path or strand the broker in a half-updated state.
         self._position = None
         self._funding_anchor_ts = None
+        if self._on_trade is not None:
+            try:
+                self._on_trade(trade)
+            except Exception:
+                _log.exception("on_trade callback failed; trade recorded, position closed")
 
     def _apply_funding(self, price: float, ts: float) -> None:
         if self._position is None or self._funding_anchor_ts is None or self._funding == 0.0:

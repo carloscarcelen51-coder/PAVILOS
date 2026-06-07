@@ -35,6 +35,26 @@ def test_stop_out_records_loss_trade_with_reason_stop():
     assert t.exit == 103.0
 
 
+def test_on_trade_exception_does_not_corrupt_broker_state():
+    # A failing on_trade callback (e.g. disk error during persistence) must NOT
+    # propagate out of the price-driven path NOR leave a ghost position: the close
+    # is atomic (position cleared) and the callback is isolated. After the close
+    # the broker is flat, equity reflects exactly one close, and it can be re-armed.
+    def boom(_t):
+        raise OSError("disk full")
+
+    bk = PaperBroker(starting_equity=10_000.0, taker_fee=0.0, maker_fee=0.0, on_trade=boom)
+    bk.place_entry("LONG", trigger=100.0, stop=98.0, size=1.0)
+    bk.on_price(100.0, ts=1.0)      # entry fill
+    bk.on_price(97.0, ts=2.0)       # stop-out -> _close_at -> failing on_trade
+    assert bk.position() is None                       # no ghost position
+    assert len(bk.trades()) == 1                       # exactly one close recorded
+    # equity = start + gross(1*(97-100)) = 9_997.0 (no fees); exactly one close applied
+    assert abs(bk.equity() - 9_997.0) < 1e-9
+    bk.place_entry("SHORT", trigger=95.0, stop=99.0, size=1.0)  # re-armable
+    assert bk.pending_entry() is not None
+
+
 def test_no_trade_recorded_without_a_close():
     bk = PaperBroker(starting_equity=10_000.0, taker_fee=0.0, maker_fee=0.0)
     bk.place_entry("LONG", trigger=100.0, stop=98.0, size=1.0)

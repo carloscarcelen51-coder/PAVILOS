@@ -91,6 +91,36 @@ def test_runtime_loads_history_and_publishes_summary(tmp_path):
     assert len(rt.all_trades) == 2
 
 
+def test_on_trade_persistence_failure_does_not_propagate_or_corrupt_broker(tmp_path):
+    # A disk/IO failure inside the trade-log persistence (TradeLog.append raising)
+    # must NEVER crash the trading path or strand the broker with a ghost position.
+    # Build a real Runtime, monkeypatch trade_log.append to raise, open + stop-out a
+    # position via the broker, and assert: no exception escapes, the broker is flat
+    # (position cleared), a subsequent place_entry succeeds, and the in-memory
+    # all_trades record was still appended (best-effort, persistence-independent).
+    p = tmp_path / "trades.jsonl"
+    rt = Runtime.build(RuntimeConfig(trade_log_path=str(p)),
+                       connector_factory=lambda v, sym: _FakeConnector(v))
+
+    def boom(_t):
+        raise OSError("disk full")
+
+    rt.trade_log.append = boom  # type: ignore[assignment]
+
+    bk = rt.trading_engine.broker
+    bk.place_entry("LONG", trigger=100.0, stop=98.0, size=1.0)
+    bk.on_price(100.0, ts=1.0)   # entry fill
+    # Stop-out drives _close_at -> _on_trade (which calls the failing append).
+    # Must not raise out of the trading path.
+    bk.on_price(97.0, ts=2.0)
+
+    assert bk.position() is None                 # broker is flat (no ghost position)
+    assert len(rt.all_trades) == 1              # in-memory record still kept
+    # broker can be re-armed: a persistence failure left no half-updated state
+    bk.place_entry("SHORT", trigger=95.0, stop=97.0, size=1.0)
+    assert bk.pending_entry() is not None
+
+
 def test_supervisor_restarts_a_crashing_trading_loop():
     rt = Runtime.build(RuntimeConfig(), connector_factory=lambda v, sym: _FakeConnector(v))
     calls = {"n": 0}

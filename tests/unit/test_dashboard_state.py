@@ -68,3 +68,19 @@ def test_update_includes_trades_and_summary():
 def test_initial_snapshot_has_empty_trades_and_summary():
     snap = DashboardState().snapshot()
     assert snap["trades"] == [] and snap["summary"] == {}
+
+
+def test_non_finite_mid_sanitized_to_none():
+    # A non-finite mid (NaN/Inf) must NOT serialize into the snapshot: FastAPI's
+    # JSONResponse rejects non-finite floats (HTTP 500 -> dashboard "feed lost").
+    # Sanitize mid/equity/realized_equity to None so the JS renders a dash.
+    import math
+    from dataclasses import replace
+    st = DashboardState()
+    bk = PaperBroker(starting_equity=10_000.0, taker_fee=0.0, maker_fee=0.0)
+    bad = replace(_analysis(), mid=float("nan"))
+    st.update(bad, bk, [], engine_state="IDLE", now=10.0)
+    snap = st.snapshot()
+    assert snap["mid"] is None
+    assert snap["equity"] is None or math.isfinite(snap["equity"])
+    assert snap["realized_equity"] is None or math.isfinite(snap["realized_equity"])

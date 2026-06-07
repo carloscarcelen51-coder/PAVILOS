@@ -5,8 +5,17 @@ snapshot() returns the latest by atomic reference read (no lock needed: CPython
 attribute assignment is atomic, and readers always get a complete prior dict)."""
 from __future__ import annotations
 
+import math
+
 from pavilos.detection.models import DepthAnalysis
 from pavilos.execution.broker import PaperBroker
+
+
+def _finite(x):
+    # Coerce non-finite floats (NaN/Inf) to None at the serialization boundary:
+    # FastAPI's JSONResponse rejects non-finite floats with HTTP 500, which the
+    # dashboard JS surfaces as a permanent "feed lost" veil. None renders as a dash.
+    return x if (isinstance(x, (int, float)) and math.isfinite(x)) else None
 
 _EMPTY: dict = {
     "ts": None, "mid": None, "state": "IDLE", "supports": [], "resistances": [],
@@ -41,9 +50,12 @@ class DashboardState:
         pend = broker.pending_entry()
         fills = broker.fills()[-12:]
         mark_equity = broker.equity(analysis.mid)  # mark-to-market once; reuse below
+        realized_equity = mark_equity if pos is None else mark_equity - (
+            pos.size * (analysis.mid - pos.entry) if pos.side == "LONG"
+            else pos.size * (pos.entry - analysis.mid))
         snap = {
             "ts": analysis.ts,
-            "mid": analysis.mid,
+            "mid": _finite(analysis.mid),
             "state": engine_state,
             "supports": [_zone(z) for z in analysis.supports],
             "resistances": [_zone(z) for z in analysis.resistances],
@@ -51,9 +63,8 @@ class DashboardState:
                 "side": pos.side, "size": pos.size, "entry": pos.entry, "stop": pos.stop},
             "pending": None if pend is None else {
                 "side": pend["side"], "trigger": pend["trigger"], "stop": pend["stop"], "size": pend["size"]},
-            "equity": mark_equity,
-            "realized_equity": mark_equity if pos is None else mark_equity - (
-                pos.size * (analysis.mid - pos.entry) if pos.side == "LONG" else pos.size * (pos.entry - analysis.mid)),
+            "equity": _finite(mark_equity),
+            "realized_equity": _finite(realized_equity),
             "fills": [{"ts": f.ts, "side": f.side, "price": f.price, "size": f.size,
                        "fee": f.fee, "kind": f.kind} for f in fills],
             "venues": [{"exchange": h.exchange, "connected": h.connected,
