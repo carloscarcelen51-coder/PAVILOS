@@ -1,0 +1,76 @@
+# tests/unit/test_paper_broker.py
+from pavilos.execution.broker import PaperBroker, Position
+
+
+def _bk(**kw):
+    return PaperBroker(starting_equity=10_000.0, taker_fee=0.0005, maker_fee=0.0002,
+                       funding_rate_hourly=0.0, **kw)
+
+
+def test_long_entry_fills_on_trigger_and_charges_fee():
+    bk = _bk()
+    bk.place_entry("LONG", trigger=100.0, stop=98.0, size=2.0)
+    bk.on_price(99.0, ts=0.0)              # below trigger -> no fill
+    assert bk.position() is None and bk.pending_entry() is not None
+    bk.on_price(100.0, ts=1.0)            # touches trigger -> fill
+    pos = bk.position()
+    assert isinstance(pos, Position) and pos.side == "LONG" and pos.size == 2.0
+    assert pos.entry == 100.0 and pos.stop == 98.0
+    assert bk.pending_entry() is None
+    # entry fee = size*entry*taker = 2*100*0.0005 = 0.10
+    assert abs(bk.equity() - (10_000.0 - 0.10)) < 1e-9
+
+
+def test_long_stop_out_realizes_loss_and_clears_position():
+    bk = _bk()
+    bk.place_entry("LONG", trigger=100.0, stop=98.0, size=2.0)
+    bk.on_price(100.0, ts=1.0)            # fill
+    bk.on_price(97.0, ts=2.0)            # below stop -> stop fills at stop=98.0
+    assert bk.position() is None
+    # pnl = 2*(98-100) = -4.0 ; entry fee 0.10 ; exit fee 2*98*0.0005=0.098
+    assert abs(bk.equity() - (10_000.0 - 4.0 - 0.10 - 0.098)) < 1e-9
+
+
+def test_short_entry_and_stop_are_mirrored():
+    bk = _bk()
+    bk.place_entry("SHORT", trigger=100.0, stop=102.0, size=1.0)
+    bk.on_price(101.0, ts=0.0)           # above trigger -> no short fill
+    assert bk.position() is None
+    bk.on_price(100.0, ts=1.0)           # touches trigger -> short fills
+    assert bk.position().side == "SHORT"
+    bk.on_price(103.0, ts=2.0)           # above stop -> stop fills at 102.0
+    assert bk.position() is None
+    # pnl = 1*(100-102) = -2.0 ; fees 1*100*.0005 + 1*102*.0005
+    assert abs(bk.equity() - (10_000.0 - 2.0 - 0.05 - 0.051)) < 1e-9
+
+
+def test_cancel_entry_clears_pending():
+    bk = _bk()
+    bk.place_entry("LONG", trigger=100.0, stop=98.0, size=2.0)
+    bk.cancel_entry()
+    bk.on_price(100.0, ts=1.0)
+    assert bk.pending_entry() is None and bk.position() is None
+    assert bk.equity() == 10_000.0
+
+
+def test_modify_stop_and_close_take_profit():
+    bk = _bk()
+    bk.place_entry("LONG", trigger=100.0, stop=98.0, size=2.0)
+    bk.on_price(100.0, ts=1.0)
+    bk.on_price(110.0, ts=2.0)           # price rose; equity reflects unrealized
+    assert abs(bk.equity() - (10_000.0 - 0.10 + 2.0 * (110.0 - 100.0))) < 1e-9
+    bk.modify_stop(105.0)                 # trail up
+    assert bk.position().stop == 105.0
+    bk.close(ts=3.0)                      # market close at last price 110
+    assert bk.position() is None
+    # realized pnl = 2*(110-100)=20 ; exit fee 2*110*.0005=0.11
+    assert abs(bk.equity() - (10_000.0 - 0.10 + 20.0 - 0.11)) < 1e-9
+
+
+def test_funding_charged_hourly_to_longs():
+    bk = PaperBroker(starting_equity=10_000.0, taker_fee=0.0, maker_fee=0.0,
+                     funding_rate_hourly=0.0001)
+    bk.place_entry("LONG", trigger=100.0, stop=90.0, size=1.0)
+    bk.on_price(100.0, ts=0.0)           # fill at t=0
+    bk.on_price(100.0, ts=3600.0)        # +1h -> funding = notional*rate = 100*0.0001 = 0.01
+    assert abs(bk.equity() - (10_000.0 - 0.01)) < 1e-9
