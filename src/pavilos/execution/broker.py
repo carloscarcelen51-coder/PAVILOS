@@ -27,6 +27,20 @@ class Fill:
     kind: str          # "entry" | "stop" | "close"
 
 
+@dataclass(slots=True, frozen=True)
+class Trade:
+    side: str            # "LONG" | "SHORT"
+    size: float
+    entry: float
+    exit: float
+    entry_ts: float
+    exit_ts: float
+    pnl: float           # NET realized = gross price P&L - entry_fee - exit_fee (excludes funding)
+    fee: float           # entry_fee + exit_fee
+    return_pct: float    # pnl / (entry*size) * 100
+    reason: str          # "stop" | "close"
+
+
 class PaperBroker:
     """Single-position paper broker. ``place_entry`` arms a stop entry (LONG fills
     when price >= trigger, SHORT when price <= trigger). A LONG stop-loss fills
@@ -34,7 +48,8 @@ class PaperBroker:
     funding is charged hourly on the notional (LONG pays, SHORT receives)."""
 
     def __init__(self, *, starting_equity: float, taker_fee: float = 0.0005,
-                 maker_fee: float = 0.0002, funding_rate_hourly: float = 0.0) -> None:
+                 maker_fee: float = 0.0002, funding_rate_hourly: float = 0.0,
+                 on_trade=None) -> None:
         if starting_equity <= 0:
             raise ValueError("starting_equity must be positive")
         self._equity = starting_equity            # realized cash
@@ -46,6 +61,10 @@ class PaperBroker:
         self._last_price = 0.0
         self._funding_anchor_ts: float | None = None
         self._fills: list[Fill] = []
+        self._on_trade = on_trade
+        self._trades: list[Trade] = []
+        self._entry_fee = 0.0
+        self._entry_ts = 0.0
 
     # --- order management -------------------------------------------------
     def place_entry(self, side: str, *, trigger: float, stop: float, size: float) -> None:
@@ -112,6 +131,9 @@ class PaperBroker:
     def fills(self) -> list[Fill]:
         return list(self._fills)
 
+    def trades(self) -> list[Trade]:
+        return list(self._trades)
+
     # --- internals --------------------------------------------------------
     def _open(self, side: str, price: float, stop: float, size: float, ts: float) -> None:
         fee = size * price * self._taker
@@ -120,14 +142,24 @@ class PaperBroker:
         self._funding_anchor_ts = ts
         self._last_price = price
         self._fills.append(Fill(ts, side, price, size, fee, "entry"))
+        self._entry_fee = fee
+        self._entry_ts = ts
 
     def _close_at(self, price: float, ts: float, kind: str) -> None:
         pos = self._position
         assert pos is not None
-        pnl = pos.size * (price - pos.entry) if pos.side == "LONG" else pos.size * (pos.entry - price)
-        fee = pos.size * price * self._taker
-        self._equity += pnl - fee
-        self._fills.append(Fill(ts, pos.side, price, pos.size, fee, kind))
+        gross = pos.size * (price - pos.entry) if pos.side == "LONG" else pos.size * (pos.entry - price)
+        exit_fee = pos.size * price * self._taker
+        self._equity += gross - exit_fee
+        self._fills.append(Fill(ts, pos.side, price, pos.size, exit_fee, kind))
+        notional = pos.entry * pos.size
+        net = gross - self._entry_fee - exit_fee
+        trade = Trade(side=pos.side, size=pos.size, entry=pos.entry, exit=price,
+                      entry_ts=self._entry_ts, exit_ts=ts, pnl=net, fee=self._entry_fee + exit_fee,
+                      return_pct=(net / notional * 100.0) if notional else 0.0, reason=kind)
+        self._trades.append(trade)
+        if self._on_trade is not None:
+            self._on_trade(trade)
         self._position = None
         self._funding_anchor_ts = None
 
