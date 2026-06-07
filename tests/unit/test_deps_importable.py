@@ -4,3 +4,7 @@ def test_async_transport_deps_importable():
     import aiohttp     # noqa: F401
     assert websockets is not None
     assert aiohttp is not None
+
+
+def test_web_deps_importable():
+    import fastapi, uvicorn, httpx  # noqa: F401
