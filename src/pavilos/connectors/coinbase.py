@@ -1,6 +1,6 @@
 # src/pavilos/connectors/coinbase.py
-"""Coinbase Advanced Trade level2 sequencer (pure). Messages arrive as
-channel 'l2_data'; integrity is per-product sequence_num (+1 exact)."""
+"""Coinbase Advanced Trade level2 sequencer (pure). Book updates arrive as
+channel 'l2_data'; integrity is the connection-level sequence_num (+1 exact)."""
 from __future__ import annotations
 
 from pavilos.core.models import BookUpdate
@@ -10,22 +10,31 @@ from pavilos.connectors.base import ResyncRequired
 class CoinbaseFeed:
     """Turns Coinbase ``l2_data`` frames into ``BookUpdate``s. ``new_quantity`` is
     absolute (``"0"`` removes; passed through for BookState to drop). ``side`` is
-    ``bid``/``offer`` (offer -> ask). Gap on ``sequence_num`` raises ResyncRequired;
-    a lower/equal sequence_num is ignored (duplicate / out-of-order)."""
+    ``bid``/``offer`` (offer -> ask).
+
+    ``sequence_num`` is a CONNECTION-LEVEL counter that increments for EVERY
+    message on the socket (l2_data, heartbeats, subscriptions), so continuity is
+    validated across ALL frames — otherwise an interleaved heartbeat looks like a
+    gap and triggers a false resync. Only ``l2_data`` frames emit a BookUpdate; a
+    gap raises ResyncRequired, a lower/equal sequence_num is ignored, and an
+    update arriving before the first snapshot raises ResyncRequired."""
 
     def __init__(self, exchange: str = "coinbase") -> None:
         self.exchange = exchange
         self._last_seq: int | None = None
+        self._have_snapshot = False
 
     def process(self, msg: dict, *, ts: float) -> BookUpdate | None:
-        if msg.get("channel") != "l2_data":
-            return None  # subscriptions / heartbeats / other
         seq = msg.get("sequence_num")
         if seq is not None and self._last_seq is not None:
             if seq <= self._last_seq:
                 return None  # duplicate / out-of-order
             if seq > self._last_seq + 1:
                 raise ResyncRequired(f"coinbase sequence gap: {seq} > {self._last_seq}+1")
+        if seq is not None:
+            self._last_seq = seq  # advance for EVERY frame (connection-level counter)
+        if msg.get("channel") != "l2_data":
+            return None  # heartbeats / subscriptions: counted above for continuity, not emitted
         is_snapshot = False
         bids: list[tuple[float, float]] = []
         asks: list[tuple[float, float]] = []
@@ -42,9 +51,9 @@ class CoinbaseFeed:
                     asks.append((price, size))
                 else:
                     raise ResyncRequired(f"coinbase: unexpected side {side!r}")
-        if not is_snapshot and self._last_seq is None:
+        if is_snapshot:
+            self._have_snapshot = True
+        elif not self._have_snapshot:
             raise ResyncRequired("coinbase: update before snapshot")
-        if seq is not None:
-            self._last_seq = seq
         return BookUpdate(exchange=self.exchange, ts=ts, bids=tuple(bids), asks=tuple(asks),
                           is_snapshot=is_snapshot, seq=seq)
