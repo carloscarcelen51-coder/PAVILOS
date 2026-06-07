@@ -42,6 +42,8 @@ class CoinbaseFeed:
                     asks.append((price, size))
                 else:
                     raise ResyncRequired(f"coinbase: unexpected side {side!r}")
+        if not is_snapshot and self._last_seq is None:
+            raise ResyncRequired("coinbase: update before snapshot")
         if seq is not None:
             self._last_seq = seq
         return BookUpdate(exchange=self.exchange, ts=ts, bids=tuple(bids), asks=tuple(asks),

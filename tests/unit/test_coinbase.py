@@ -53,3 +53,9 @@ def test_unexpected_side_raises_resync():
     # mis-file as an ask and corrupt the book.
     with pytest.raises(ResyncRequired):
         feed.process(_msg("snapshot", 0, [_u("sell", "100.0", "1.0")]), ts=1.0)
+
+
+def test_update_before_snapshot_raises_resync():
+    feed = CoinbaseFeed()
+    with pytest.raises(ResyncRequired):
+        feed.process(_msg("update", 5, [_u("bid", "100.0", "1.0")]), ts=1.0)

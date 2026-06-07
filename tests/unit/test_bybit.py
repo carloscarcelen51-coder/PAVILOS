@@ -47,3 +47,18 @@ def test_mid_stream_snapshot_resets():
     feed.process(_msg("snapshot", 100, [["100.0", "1.0"]], []), ts=1.0)
     out = feed.process(_msg("snapshot", 200, [["100.0", "9.0"]], []), ts=2.0)  # re-sent snapshot
     assert out.is_snapshot is True and out.seq == 200
+
+
+def test_delta_before_snapshot_raises_resync():
+    feed = BybitFeed()
+    with pytest.raises(ResyncRequired):
+        feed.process(_msg("delta", 500, [["100.0", "1.0"]], [["101.0", "2.0"]]), ts=1.0)
+
+
+def test_delta_missing_u_raises_resync():
+    feed = BybitFeed()
+    feed.process(_msg("snapshot", 100, [["100.0", "1.0"]], []), ts=1.0)
+    msg = _msg("delta", 101, [["100.0", "2.0"]], [])
+    del msg["data"]["u"]   # a delta with no u must not bypass continuity
+    with pytest.raises(ResyncRequired):
+        feed.process(msg, ts=2.0)

@@ -27,8 +27,13 @@ class BybitFeed:
         data = msg["data"]
         u = data.get("u")
         is_snapshot = msg["type"] == "snapshot" or u == 1
-        if not is_snapshot and self._last_u is not None and u is not None and u != self._last_u + 1:
-            raise ResyncRequired(f"bybit u gap: {u} != {self._last_u}+1")
+        if not is_snapshot:
+            if self._last_u is None:
+                raise ResyncRequired("bybit: delta before snapshot")
+            if u is None:
+                raise ResyncRequired("bybit: delta missing u")
+            if u != self._last_u + 1:
+                raise ResyncRequired(f"bybit u gap: {u} != {self._last_u}+1")
         if u is not None:
             self._last_u = u
         return BookUpdate(exchange=self.exchange, ts=ts, bids=_levels(data.get("b", [])),
