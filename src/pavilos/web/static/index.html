@@ -62,7 +62,7 @@
   /* ─── shell grid ─────────────────────────────────────────────────────── */
   .shell {
     display:grid;
-    grid-template-rows:auto 1fr auto;
+    grid-template-rows:auto minmax(0,1fr) auto auto;
     height:100vh;
     gap:0;
   }
@@ -320,6 +320,70 @@
   .fill .fs.SHORT { color:var(--ask); font-weight:600; }
   .fills .empty-f { padding:0 16px; color:var(--ink-faint); font-size:11px; letter-spacing:1px; }
 
+  /* ─── all-time P&L summary (inside position panel) ───────────────────────── */
+  .pnl-summary {
+    margin-top:4px; padding-top:12px; border-top:1px solid var(--rule);
+    display:flex; flex-direction:column; gap:10px;
+  }
+  .pnl-summary .sum-head {
+    display:flex; align-items:baseline; justify-content:space-between;
+  }
+  .pnl-summary .sum-head .lbl {
+    font-size:9.5px; letter-spacing:2px; color:var(--ink-faint); text-transform:uppercase;
+  }
+  .pnl-summary .sum-head .v { font-size:21px; font-weight:700; letter-spacing:.4px; }
+  .pnl-summary .sum-head .ret { font-size:12px; font-weight:500; margin-left:8px; }
+  .sum-grid {
+    display:grid; grid-template-columns:repeat(3,1fr); gap:1px;
+    background:var(--rule); border:1px solid var(--rule);
+  }
+  .sum-cell {
+    display:flex; flex-direction:column; gap:3px;
+    padding:8px 10px; background:var(--bg-raised);
+  }
+  .sum-cell .k { font-size:9px; letter-spacing:1.6px; color:var(--ink-faint); text-transform:uppercase; }
+  .sum-cell .n { font-size:15px; font-weight:600; letter-spacing:.3px; }
+  .sum-cell .n .wl-w { color:var(--bid); }
+  .sum-cell .n .wl-l { color:var(--ask); }
+  .sum-cell .n .wl-sep { color:var(--ink-faint); margin:0 4px; }
+
+  /* ─── trades / history table ─────────────────────────────────────────────── */
+  .trades { display:flex; flex-direction:column; }
+  .thead, .trow {
+    display:grid;
+    grid-template-columns:62px 54px minmax(0,1.5fr) 50px 1fr 56px 50px;
+    align-items:center; gap:8px;
+    padding:6px 16px;
+  }
+  .thead {
+    position:sticky; top:0; z-index:2;
+    border-bottom:1px solid var(--rule);
+    background:var(--bg-panel);
+    font-size:9px; letter-spacing:1.4px; color:var(--ink-faint); text-transform:uppercase;
+  }
+  .thead .r { text-align:right; }
+  .trow {
+    border-bottom:1px solid rgba(255,255,255,.02);
+    font-size:12px; min-height:30px;
+  }
+  .trow:hover { background:rgba(255,255,255,.018); }
+  .trow .tt { color:var(--ink-faint); font-size:11px; }
+  .trow .tside { font-weight:700; letter-spacing:1px; font-size:11px; }
+  .trow .tside.LONG  { color:var(--bid); }
+  .trow .tside.SHORT { color:var(--ask); }
+  .trow .tpx { color:var(--ink-dim); font-size:11.5px; }
+  .trow .tpx .arw { color:var(--ink-faint); margin:0 5px; }
+  .trow .tpx .ix { color:var(--ink); }
+  .trow .tsz { text-align:right; color:var(--ink-dim); font-size:11.5px; }
+  .trow .tpnl { text-align:right; font-weight:600; }
+  .trow .tret { text-align:right; font-size:11.5px; }
+  .trow .treason {
+    text-align:right; font-size:9px; letter-spacing:1.2px; text-transform:uppercase;
+    color:var(--ink-dim);
+  }
+  .trow .treason.stop  { color:var(--amber); }
+  .trow .treason.close { color:var(--cyan); }
+
   /* connection-lost veil */
   .offline-veil {
     position:fixed; inset:0; z-index:60; display:none;
@@ -387,11 +451,12 @@
         </div>
       </section>
 
-      <!-- POSITION / PENDING / EQUITY -->
+      <!-- POSITION / PENDING / EQUITY + ALL-TIME P&L SUMMARY -->
       <section class="panel">
         <div class="panel-h"><span class="t">Position</span><span class="sub" id="pos-sub">paper book</span></div>
         <div class="panel-body">
           <div class="pos" id="pos"></div>
+          <div class="pos" id="pnl-summary" style="padding-top:0"></div>
         </div>
       </section>
 
@@ -404,6 +469,24 @@
         </div>
       </section>
     </div>
+
+    <!-- ─── TRADES / HISTORY ───────────────────────────────────────────── -->
+    <section class="panel" style="border-right:none;border-top:1px solid var(--rule);max-height:34vh">
+      <div class="panel-h">
+        <span class="t">Trades</span><span class="sub">history · newest first</span>
+        <span class="sub" id="trades-count" style="margin-left:auto">—</span>
+      </div>
+      <div class="panel-body">
+        <div class="trades">
+          <div class="thead">
+            <span>time</span><span>side</span><span>entry → exit</span>
+            <span class="r">size</span><span class="r">P&amp;L €</span>
+            <span class="r">P&amp;L %</span><span class="r">reason</span>
+          </div>
+          <div id="trades"></div>
+        </div>
+      </div>
+    </section>
 
     <!-- ─── RECENT FILLS ───────────────────────────────────────────────── -->
     <div class="fills">
@@ -423,6 +506,16 @@
   function n0(x)  { return (x === null || x === undefined || !isFinite(x)) ? null : Math.round(x).toLocaleString("en-US"); }
   function n1(x)  { return (x === null || x === undefined || !isFinite(x)) ? null
                      : x.toLocaleString("en-US", {minimumFractionDigits:1, maximumFractionDigits:1}); }
+  // price with thousands separators (up to 1dp) — used in the trades history rows
+  function nPx(x) { return (x === null || x === undefined || !isFinite(x)) ? null
+                     : x.toLocaleString("en-US", {minimumFractionDigits:0, maximumFractionDigits:1}); }
+  // signed percentage, 2dp — used for trade return % and all-time return
+  function pctSigned(x) {
+    if (x === null || x === undefined || !isFinite(x)) return null;
+    var s = x >= 0 ? "+" : "−";
+    return s + Math.abs(x).toLocaleString("en-US", {minimumFractionDigits:2, maximumFractionDigits:2}) + "%";
+  }
+  function signCls(x) { return (x === null || x === undefined || !isFinite(x)) ? "" : (x >= 0 ? "up" : "down"); }
   function nSz(x) { return (x === null || x === undefined || !isFinite(x)) ? null
                      : x.toLocaleString("en-US", {minimumFractionDigits:0, maximumFractionDigits:4}); }
   function eur(x) { return (x === null || x === undefined || !isFinite(x)) ? null
@@ -463,11 +556,14 @@
     venues:    $("venues-count"),
     res:       $("res"),
     sup:       $("sup"),
-    pos:       $("pos"),
-    posSub:    $("pos-sub"),
-    vlist:     $("vlist"),
-    fills:     $("fills"),
-    veil:      $("veil"),
+    pos:        $("pos"),
+    posSub:     $("pos-sub"),
+    pnlSummary: $("pnl-summary"),
+    vlist:      $("vlist"),
+    fills:      $("fills"),
+    trades:     $("trades"),
+    tradesCount:$("trades-count"),
+    veil:       $("veil"),
   };
 
   // ─── zone ladder ─────────────────────────────────────────────────────────
@@ -628,6 +724,85 @@
     });
   }
 
+  // ─── all-time P&L summary ──────────────────────────────────────────────────
+  function renderSummary(s) {
+    var box = refs.pnlSummary;
+    if (!box) return;
+    box.textContent = "";
+    var sum = (s && s.summary && typeof s.summary === "object") ? s.summary : {};
+    var realized = isFinite(sum.realized_pnl) ? sum.realized_pnl : null;
+    var ret      = isFinite(sum.return_pct)   ? sum.return_pct   : null;
+    var nTrades  = isFinite(sum.n_trades)     ? sum.n_trades     : null;
+    var winRate  = isFinite(sum.win_rate)     ? sum.win_rate     : null;
+    var wins     = isFinite(sum.wins)         ? sum.wins         : null;
+    var losses   = isFinite(sum.losses)       ? sum.losses       : null;
+
+    var wrap = el('<div class="pnl-summary"></div>');
+
+    var head = el(
+      '<div class="sum-head">' +
+        '<span class="lbl">all-time realized P&amp;L</span>' +
+        '<span><span class="v num ' + signCls(realized) + '">' +
+          (realized == null ? EM : (eurSigned(realized) || EM)) + '</span>' +
+        '<span class="ret num ' + signCls(ret) + '">' +
+          (ret == null ? "" : (pctSigned(ret) || "")) + '</span></span>' +
+      '</div>');
+    wrap.appendChild(head);
+
+    var grid = el('<div class="sum-grid"></div>');
+    grid.appendChild(el(
+      '<div class="sum-cell"><span class="k">trades</span>' +
+      '<span class="n num">' + (nTrades == null ? EM : nTrades) + '</span></div>'));
+    grid.appendChild(el(
+      '<div class="sum-cell"><span class="k">win rate</span>' +
+      '<span class="n num">' + (winRate == null ? EM
+        : winRate.toLocaleString("en-US", {minimumFractionDigits:0, maximumFractionDigits:1}) + "%") +
+      '</span></div>'));
+    grid.appendChild(el(
+      '<div class="sum-cell"><span class="k">W / L</span>' +
+      '<span class="n num">' +
+        (wins == null && losses == null ? EM
+          : '<span class="wl-w">' + (wins == null ? EM : wins) + '</span>' +
+            '<span class="wl-sep">/</span>' +
+            '<span class="wl-l">' + (losses == null ? EM : losses) + '</span>') +
+      '</span></div>'));
+    wrap.appendChild(grid);
+
+    box.appendChild(wrap);
+  }
+
+  // ─── trades / history table ────────────────────────────────────────────────
+  function renderTrades(s) {
+    var box = refs.trades;
+    if (!box) return;
+    box.textContent = "";
+    var trades = (s && Array.isArray(s.trades)) ? s.trades.slice() : [];
+    if (refs.tradesCount) refs.tradesCount.textContent = trades.length ? (trades.length + " rows") : EM;
+    if (trades.length === 0) {
+      box.appendChild(el('<div class="empty">no closed trades yet</div>'));
+      return;
+    }
+    trades.reverse(); // newest first (log is appended oldest→newest)
+    trades.forEach(function (t) {
+      t = t || {};
+      var side = (t.side === "LONG" || t.side === "SHORT") ? t.side : "";
+      var reason = (t.reason || "").toLowerCase();
+      var pnlCls = signCls(t.pnl);
+      var row = el(
+        '<div class="trow">' +
+          '<span class="tt num">' + hms(t.exit_ts) + '</span>' +
+          '<span class="tside ' + esc(side) + '">' + (side || EM) + '</span>' +
+          '<span class="tpx num"><span class="ix">' + (nPx(t.entry) || EM) + '</span>' +
+            '<span class="arw">→</span><span class="ix">' + (nPx(t.exit) || EM) + '</span></span>' +
+          '<span class="tsz num">' + (nSz(t.size) || EM) + '</span>' +
+          '<span class="tpnl num ' + pnlCls + '">' + (eurSigned(t.pnl) || EM) + '</span>' +
+          '<span class="tret num ' + pnlCls + '">' + (pctSigned(t.return_pct) || EM) + '</span>' +
+          '<span class="treason ' + esc(reason) + '">' + (esc(t.reason) || EM) + '</span>' +
+        '</div>');
+      box.appendChild(row);
+    });
+  }
+
   // ─── header ──────────────────────────────────────────────────────────────
   function renderHeader(s) {
     refs.mid.textContent = n1(s.mid) || EM;
@@ -652,8 +827,10 @@
     renderZones(refs.res, s.resistances, "res");
     renderZones(refs.sup, s.supports, "sup");
     renderPosition(s);
+    renderSummary(s);
     renderVenues(s);
     renderFills(s);
+    renderTrades(s);
   }
 
   // ─── polling loop: fetch /api/state every 1000ms ─────────────────────────
@@ -680,7 +857,8 @@
 
   // initial paint with the empty shape so nothing reads as broken before first fetch
   render({ state: "IDLE", supports: [], resistances: [], venues: [], fills: [],
-           position: null, pending: null, mid: null, equity: null, stale: false });
+           position: null, pending: null, mid: null, equity: null, stale: false,
+           trades: [], summary: {} });
   tick();
   setInterval(tick, POLL_MS);
 })();

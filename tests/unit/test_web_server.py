@@ -28,3 +28,11 @@ def test_api_state_reflects_updates():
     state._snap = {**state.snapshot(), "mid": 104231.5, "state": "IN_POSITION"}
     body = client.get("/api/state").json()
     assert body["mid"] == 104231.5 and body["state"] == "IN_POSITION"
+
+
+def test_dashboard_page_references_trades_and_summary():
+    from fastapi.testclient import TestClient
+    from pavilos.web.state import DashboardState
+    from pavilos.web.server import create_app
+    html = TestClient(create_app(DashboardState())).get("/").text
+    assert "trades" in html and "summary" in html  # the JS consumes snap.trades + snap.summary
