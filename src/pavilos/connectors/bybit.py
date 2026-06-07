@@ -15,7 +15,8 @@ class BybitFeed:
     """Turns Bybit ``orderbook.*`` frames into ``BookUpdate``s. A ``type:"snapshot"``
     OR ``u == 1`` (service restart) resets the book; a ``delta`` is valid iff
     ``u == last_u + 1``. A non-consecutive ``u`` raises ResyncRequired. ``seq`` is
-    NOT used for continuity. Sizes absolute; ``"0"`` removes."""
+    NOT used for continuity. Sizes absolute; ``"0"`` removes. A delta arriving
+    before any snapshot, or a delta with no ``u``, also raises ResyncRequired."""
 
     def __init__(self, exchange: str = "bybit") -> None:
         self.exchange = exchange

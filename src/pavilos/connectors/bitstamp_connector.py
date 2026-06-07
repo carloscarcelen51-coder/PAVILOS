@@ -12,7 +12,7 @@ import aiohttp
 import websockets
 
 from pavilos.core.models import BookUpdate
-from pavilos.connectors.base import ConnectorHealth, ResyncRequired
+from pavilos.connectors.base import ConnectorHealth, ResyncRequired, aclose_stream
 from pavilos.connectors.bitstamp import BitstampDepthFeed
 
 BITSTAMP_WS_URL = "wss://ws.bitstamp.net"
@@ -86,7 +86,7 @@ class BitstampConnector:
                 _log.exception("bitstamp connector error; will reconnect")
             finally:
                 self._connected = False
-                await _aclose(stream)
+                await aclose_stream(stream)
             if stop.is_set():
                 break
             delay = min(backoff, self._max_backoff)
@@ -118,16 +118,6 @@ class BitstampConnector:
             async with session.get(f"{self._rest_url}/{self.symbol}/", proxy=self._proxy) as resp:
                 resp.raise_for_status()
                 return await resp.json()
-
-
-async def _aclose(stream: object) -> None:
-    """Best-effort close of an async-iterator stream (idempotent, never raises)."""
-    aclose = getattr(stream, "aclose", None)
-    if aclose is not None:
-        try:
-            await aclose()
-        except Exception:
-            pass
 
 
 def _wall_now() -> float:

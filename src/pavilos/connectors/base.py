@@ -20,3 +20,17 @@ class ConnectorHealth:
     last_update_ts: float
     resyncs: int
     errors: int
+
+
+async def aclose_stream(stream: object) -> None:
+    """Best-effort close of an async-iterator stream (idempotent, never raises).
+
+    Used by connectors to deterministically close a WS stream on the
+    stop/exception/reconnect paths (the async-generator's own ``finally`` only
+    runs on natural exhaustion or GC)."""
+    aclose = getattr(stream, "aclose", None)
+    if aclose is not None:
+        try:
+            await aclose()
+        except Exception:
+            pass

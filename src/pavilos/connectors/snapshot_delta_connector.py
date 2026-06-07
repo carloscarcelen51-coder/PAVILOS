@@ -8,19 +8,9 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 from pavilos.core.models import BookUpdate
-from pavilos.connectors.base import ConnectorHealth, ResyncRequired
+from pavilos.connectors.base import ConnectorHealth, ResyncRequired, aclose_stream
 
 _log = logging.getLogger(__name__)
-
-
-async def _aclose(stream: object) -> None:
-    """Best-effort close of an async-iterator stream (idempotent, never raises)."""
-    aclose = getattr(stream, "aclose", None)
-    if aclose is not None:
-        try:
-            await aclose()
-        except Exception:
-            pass
 
 
 class SnapshotDeltaConnector:
@@ -76,7 +66,7 @@ class SnapshotDeltaConnector:
                 _log.exception("%s connector error; will reconnect", self.exchange)
             finally:
                 self._connected = False
-                await _aclose(stream)
+                await aclose_stream(stream)
             if stop.is_set():
                 break
             delay = min(backoff, self._max_backoff)

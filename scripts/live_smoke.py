@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from pavilos.core.models import VenueSpec, Quote, Tier
 from pavilos.aggregator.normalize import PegProvider
 from pavilos.aggregator.aggregator import Aggregator
 from pavilos.core.engine import Engine
