@@ -11,7 +11,7 @@ from pavilos.execution.broker import PaperBroker
 _EMPTY: dict = {
     "ts": None, "mid": None, "state": "IDLE", "supports": [], "resistances": [],
     "position": None, "pending": None, "equity": None, "realized_equity": None,
-    "fills": [], "venues": [], "stale": False,
+    "fills": [], "venues": [], "stale": False, "trades": [], "summary": {},
 }
 
 
@@ -19,6 +19,12 @@ def _zone(z) -> dict:
     return {"side": z.side.value, "price": z.price, "low": z.low, "high": z.high,
             "strength": z.strength, "venues": list(z.venues),
             "persistence_s": z.persistence_s, "pulled": z.pulled, "confidence": z.confidence}
+
+
+def _trade(t) -> dict:
+    return {"side": t.side, "size": t.size, "entry": t.entry, "exit": t.exit,
+            "entry_ts": t.entry_ts, "exit_ts": t.exit_ts, "pnl": t.pnl,
+            "fee": t.fee, "return_pct": t.return_pct, "reason": t.reason}
 
 
 class DashboardState:
@@ -29,7 +35,8 @@ class DashboardState:
         return self._snap
 
     def update(self, analysis: DepthAnalysis, broker: PaperBroker, health,
-               *, engine_state: str, now: float, staleness_s: float = 15.0) -> None:
+               *, engine_state: str, now: float, staleness_s: float = 15.0,
+               trades=(), summary=None) -> None:
         pos = broker.position()
         pend = broker.pending_entry()
         fills = broker.fills()[-12:]
@@ -53,5 +60,7 @@ class DashboardState:
                         "last_update_ts": h.last_update_ts, "resyncs": h.resyncs, "errors": h.errors}
                        for h in health],
             "stale": (now - analysis.ts) > staleness_s,
+            "trades": [_trade(t) for t in trades],
+            "summary": dict(summary) if summary else {},
         }
         self._snap = snap  # atomic swap

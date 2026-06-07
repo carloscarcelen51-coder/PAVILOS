@@ -50,3 +50,21 @@ def test_stale_flag_true_when_wall_clock_exceeds_feed_ts():
     # analysis.ts == 10.0; now == 30.0 -> 20s lag > 15s staleness
     st.update(_analysis(), bk, health, engine_state="IDLE", now=30.0, staleness_s=15.0)
     assert st.snapshot()["stale"] is True
+
+
+def test_update_includes_trades_and_summary():
+    from pavilos.execution.broker import Trade
+    from pavilos.execution.trade_log import summarize
+    st = DashboardState()
+    bk = PaperBroker(starting_equity=10_000.0, taker_fee=0.0, maker_fee=0.0)
+    trades = [Trade("LONG", 1.0, 100.0, 105.0, 1.0, 2.0, 5.0, 0.0, 5.0, "close")]
+    st.update(_analysis(), bk, [], engine_state="IDLE", now=10.0,
+              trades=trades, summary=summarize(trades, base_equity=10_000.0))
+    snap = st.snapshot()
+    assert snap["trades"][0]["pnl"] == 5.0 and snap["trades"][0]["reason"] == "close"
+    assert snap["summary"]["n_trades"] == 1 and snap["summary"]["wins"] == 1
+
+
+def test_initial_snapshot_has_empty_trades_and_summary():
+    snap = DashboardState().snapshot()
+    assert snap["trades"] == [] and snap["summary"] == {}
