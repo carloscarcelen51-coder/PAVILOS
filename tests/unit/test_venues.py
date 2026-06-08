@@ -29,3 +29,11 @@ def test_build_connector_returns_runnable_for_each_venue():
 def test_build_connector_unknown_raises():
     with pytest.raises(KeyError):
         build_connector("ftx", "BTCUSDT")
+
+
+def test_native_and_ccxt_venue_groups_partition_specs():
+    from pavilos.connectors.venues import NATIVE_VENUES, CCXT_VENUES, VENUE_SPECS
+    allnames = {s.exchange for s in VENUE_SPECS}
+    assert set(NATIVE_VENUES) | set(CCXT_VENUES) == allnames
+    assert set(NATIVE_VENUES) & set(CCXT_VENUES) == set()
+    assert set(CCXT_VENUES) == {"gate", "mexc", "cryptocom", "bitget", "kucoin", "htx"}
