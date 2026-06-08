@@ -169,3 +169,23 @@ def test_garbage_atr_does_not_arm_unreachable_stop():
     # atr so large that price - atr*atr_stop_mult <= 0 -> pathological stop -> must NOT arm
     e.update(_analysis(1.0, mid=100.0, supports=[sup]), atr=1000.0, broker=bk)
     assert e.state == "IDLE" and bk.pending_entry() is None
+
+
+def test_does_not_enter_when_boxed_in_by_near_opposing_wall():
+    e, bk = _engine(), _bk()
+    sup = _zone(Side.SUPPORT, price=99.0, low=98.8, high=99.2)
+    res = _zone(Side.RESISTANCE, price=100.2, low=100.1, high=100.3, conf=0.9)  # within 30bps above 100
+    e.update(_analysis(1.0, mid=100.0, supports=[sup], resistances=[res]), atr=1.0, broker=bk)
+    assert e.state == "IDLE" and bk.pending_entry() is None   # no room above -> skip the entry
+
+
+def test_does_not_exit_on_the_fill_tick():
+    e, bk = _engine(), _bk()
+    sup = _zone(Side.SUPPORT, price=99.0, low=98.8, high=99.2)
+    e.update(_analysis(1.0, mid=100.0, supports=[sup]), atr=1.0, broker=bk)   # arm (no opposing wall)
+    res = _zone(Side.RESISTANCE, price=101.2, low=101.1, high=101.3, conf=0.9)
+    # fill tick ALSO carries a near resistance: must NOT exit same tick (would be a 0-move fee bleed)
+    e.update(_analysis(2.0, mid=101.0, supports=[sup], resistances=[res]), atr=1.0, broker=bk)
+    assert e.state == "IN_POSITION" and bk.position() is not None
+    e.update(_analysis(3.0, mid=101.0, supports=[sup], resistances=[res]), atr=1.0, broker=bk)  # now exits
+    assert e.state == "IDLE" and bk.position() is None

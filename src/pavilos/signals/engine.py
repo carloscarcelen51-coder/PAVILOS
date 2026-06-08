@@ -55,7 +55,11 @@ class SignalEngine:
         pos = broker.position()
         # sync state from broker outcomes
         if self.state == "PENDING_ENTRY" and pos is not None:
+            # just filled this tick -> let the position breathe; manage/exit only from
+            # the NEXT snapshot (avoids a same-tick fill-then-opposing-exit that closes
+            # at the entry price and bleeds the round-trip fees for zero move)
             self.state = "IN_POSITION"
+            return
         elif self.state == "IN_POSITION" and pos is None:
             # position closed by the broker (stop-out) -> back to IDLE, and defer
             # any new setup to the NEXT snapshot (no same-tick whipsaw re-entry;
@@ -88,6 +92,8 @@ class SignalEngine:
                 best, best_dir = z, "SHORT"
         if best is None:
             return
+        if self._opposing_near(analysis, price, best_dir):
+            return  # boxed in: a near opposing wall would exit us instantly -> no room to run
         if best_dir == "LONG":
             # buy-stop just ABOVE price (fills on an up-tick); stop below the support,
             # but never tighter than the ATR floor (don't get noise-stopped)
@@ -109,6 +115,17 @@ class SignalEngine:
             return
         broker.place_entry(best_dir, trigger=trigger, stop=stop, size=size)
         self.state, self._thesis, self._dir, self._armed_ts = "PENDING_ENTRY", best, best_dir, analysis.ts
+
+    def _opposing_near(self, analysis: DepthAnalysis, price: float, direction: str) -> bool:
+        """True if a confident opposing wall sits within ``opposing_distance_bps`` —
+        the same condition that triggers the discretionary exit, so entering into it
+        would close instantly. Mirrors _manage's exit check."""
+        tol = price * self.opposing_distance_bps / 1e4
+        if direction == "LONG":
+            return any(z.confidence >= self.opposing_threshold and z.low > price
+                       and (z.low - price) <= tol for z in analysis.resistances)
+        return any(z.confidence >= self.opposing_threshold and z.high < price
+                   and (price - z.high) <= tol for z in analysis.supports)
 
     def _thesis_present(self, analysis: DepthAnalysis) -> bool:
         zones = analysis.supports if self._dir == "LONG" else analysis.resistances
