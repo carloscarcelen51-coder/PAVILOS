@@ -26,7 +26,7 @@ def _components():
     signal = SignalEngine(entry_threshold=0.3, trail_threshold=0.3, opposing_threshold=0.7,
                           min_persistence_s=0.0, min_venues=2, entry_offset_bps=2.0,
                           stop_offset_bps=2.0, atr_stop_mult=3.0, opposing_distance_bps=30.0,
-                          risk_pct=0.01, max_leverage=10.0)
+                          risk_pct=0.01, max_leverage=10.0, entry_zone_bps=100.0, pending_timeout_s=10.0)
     broker = PaperBroker(starting_equity=10_000.0, taker_fee=0.0, maker_fee=0.0, funding_rate_hourly=0.0)
     return TradingEngine(detector, ATR(window=10), signal, broker)
 

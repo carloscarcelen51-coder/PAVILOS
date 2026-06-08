@@ -3,11 +3,13 @@
 -> IN_POSITION -> IDLE.
 
 Entry is a *momentum* breakout in the trade direction, anchored by the detected
-zone as the protective stop: a strong support below price arms a LONG buy-stop
-just ABOVE the current price (fills as price ticks up — "se ejecuta subiendo")
-with the stop just below the support; a resistance above price arms a SHORT
-sell-stop just below price with the stop just above the resistance. If the
-thesis zone vanishes before the breakout fills, the pending entry is withdrawn.
+zone as the protective stop, and gated so it is a real bounce, not noise:
+- a strong support BELOW but NEAR the price (within ``entry_zone_bps``) arms a
+  LONG buy-stop just above price (fills as price ticks up — "se ejecuta subiendo");
+- a resistance ABOVE but NEAR the price arms a SHORT sell-stop just below price.
+The initial stop sits beyond the zone but never tighter than ``atr_stop_mult`` x
+ATR from price (anti-whipsaw). A pending entry is withdrawn if the thesis zone
+vanishes OR it has not filled within ``pending_timeout_s`` (avoids stale orders).
 Long off supports, short off resistances (mirrored). One position at a time."""
 from __future__ import annotations
 
@@ -19,12 +21,14 @@ class SignalEngine:
     def __init__(self, *, entry_threshold: float, trail_threshold: float, opposing_threshold: float,
                  min_persistence_s: float, min_venues: int, entry_offset_bps: float,
                  stop_offset_bps: float, atr_stop_mult: float, opposing_distance_bps: float,
-                 risk_pct: float, max_leverage: float) -> None:
+                 risk_pct: float, max_leverage: float,
+                 entry_zone_bps: float, pending_timeout_s: float) -> None:
         for name, v in (("entry_threshold", entry_threshold), ("trail_threshold", trail_threshold),
                         ("opposing_threshold", opposing_threshold), ("atr_stop_mult", atr_stop_mult),
                         ("opposing_distance_bps", opposing_distance_bps), ("risk_pct", risk_pct),
                         ("max_leverage", max_leverage), ("entry_offset_bps", entry_offset_bps),
-                        ("stop_offset_bps", stop_offset_bps)):
+                        ("stop_offset_bps", stop_offset_bps), ("entry_zone_bps", entry_zone_bps),
+                        ("pending_timeout_s", pending_timeout_s)):
             if not (v > 0):
                 raise ValueError(f"SignalEngine: {name} must be positive, got {v}")
         self.entry_threshold = entry_threshold
@@ -38,9 +42,12 @@ class SignalEngine:
         self.opposing_distance_bps = opposing_distance_bps
         self.risk_pct = risk_pct
         self.max_leverage = max_leverage
+        self.entry_zone_bps = entry_zone_bps
+        self.pending_timeout_s = pending_timeout_s
         self.state = "IDLE"
         self._thesis: Zone | None = None
         self._dir: str | None = None
+        self._armed_ts = 0.0
 
     def update(self, analysis: DepthAnalysis, atr: float, broker) -> None:
         price = analysis.mid
@@ -57,7 +64,7 @@ class SignalEngine:
             return
 
         if self.state == "IDLE":
-            self._maybe_enter(analysis, price, broker)
+            self._maybe_enter(analysis, price, atr, broker)
         elif self.state == "PENDING_ENTRY":
             self._maybe_cancel(analysis, broker)
         elif self.state == "IN_POSITION":
@@ -67,31 +74,36 @@ class SignalEngine:
         return (z.confidence >= self.entry_threshold and z.persistence_s >= self.min_persistence_s
                 and len(z.venues) >= self.min_venues)
 
-    def _maybe_enter(self, analysis: DepthAnalysis, price: float, broker) -> None:
+    def _maybe_enter(self, analysis: DepthAnalysis, price: float, atr: float, broker) -> None:
+        zone_tol = price * self.entry_zone_bps / 1e4
         best: Zone | None = None
         best_dir: str | None = None
-        for z in analysis.supports:                      # LONG: support below price
-            if self._operable(z) and z.high < price and (best is None or z.confidence > best.confidence):
+        for z in analysis.supports:                      # LONG: price just ABOVE a NEARBY support
+            if (self._operable(z) and z.high < price and (price - z.high) <= zone_tol
+                    and (best is None or z.confidence > best.confidence)):
                 best, best_dir = z, "LONG"
-        for z in analysis.resistances:                   # SHORT: resistance above price
-            if self._operable(z) and z.low > price and (best is None or z.confidence > best.confidence):
+        for z in analysis.resistances:                   # SHORT: price just BELOW a NEARBY resistance
+            if (self._operable(z) and z.low > price and (z.low - price) <= zone_tol
+                    and (best is None or z.confidence > best.confidence)):
                 best, best_dir = z, "SHORT"
         if best is None:
             return
         if best_dir == "LONG":
-            # buy-stop just ABOVE price (fills on an up-tick), stop below the support
+            # buy-stop just ABOVE price (fills on an up-tick); stop below the support,
+            # but never tighter than the ATR floor (don't get noise-stopped)
             trigger = price * (1 + self.entry_offset_bps / 1e4)
-            stop = best.low * (1 - self.stop_offset_bps / 1e4)
+            stop = min(best.low * (1 - self.stop_offset_bps / 1e4), price - atr * self.atr_stop_mult)
         else:
-            # sell-stop just BELOW price (fills on a down-tick), stop above the resistance
+            # sell-stop just BELOW price (fills on a down-tick); stop above the resistance,
+            # never tighter than the ATR floor
             trigger = price * (1 - self.entry_offset_bps / 1e4)
-            stop = best.high * (1 + self.stop_offset_bps / 1e4)
+            stop = max(best.high * (1 + self.stop_offset_bps / 1e4), price + atr * self.atr_stop_mult)
         size = position_size(broker.equity(), entry=trigger, stop=stop,
                              risk_pct=self.risk_pct, max_leverage=self.max_leverage)
         if size <= 0:
             return
         broker.place_entry(best_dir, trigger=trigger, stop=stop, size=size)
-        self.state, self._thesis, self._dir = "PENDING_ENTRY", best, best_dir
+        self.state, self._thesis, self._dir, self._armed_ts = "PENDING_ENTRY", best, best_dir, analysis.ts
 
     def _thesis_present(self, analysis: DepthAnalysis) -> bool:
         zones = analysis.supports if self._dir == "LONG" else analysis.resistances
@@ -100,7 +112,10 @@ class SignalEngine:
                    for z in zones)
 
     def _maybe_cancel(self, analysis: DepthAnalysis, broker) -> None:
-        if not self._thesis_present(analysis):
+        # withdraw the pending entry if the thesis zone vanished OR it has gone stale
+        # (price never reached the trigger within pending_timeout_s)
+        timed_out = (analysis.ts - self._armed_ts) > self.pending_timeout_s
+        if timed_out or not self._thesis_present(analysis):
             broker.cancel_entry()
             self.state, self._thesis, self._dir = "IDLE", None, None
 

@@ -68,6 +68,8 @@ class RuntimeConfig:
     opposing_distance_bps: float = 30.0
     risk_pct: float = 0.01
     max_leverage: float = 10.0
+    entry_zone_bps: float = 30.0       # only trade a support/resistance when price is within this of it
+    pending_timeout_s: float = 10.0    # cancel a pending entry that has not filled in this long
 
 
 class Runtime:
@@ -99,7 +101,8 @@ class Runtime:
                               min_venues=config.min_venues, entry_offset_bps=config.entry_offset_bps,
                               stop_offset_bps=config.stop_offset_bps, atr_stop_mult=config.atr_stop_mult,
                               opposing_distance_bps=config.opposing_distance_bps, risk_pct=config.risk_pct,
-                              max_leverage=config.max_leverage)
+                              max_leverage=config.max_leverage, entry_zone_bps=config.entry_zone_bps,
+                              pending_timeout_s=config.pending_timeout_s)
         trade_log = TradeLog(config.trade_log_path)
         all_trades = trade_log.load()
 
