@@ -22,15 +22,18 @@ class SignalEngine:
                  min_persistence_s: float, min_venues: int, entry_offset_bps: float,
                  stop_offset_bps: float, atr_stop_mult: float, opposing_distance_bps: float,
                  risk_pct: float, max_leverage: float,
-                 entry_zone_bps: float, pending_timeout_s: float) -> None:
+                 entry_zone_bps: float, pending_timeout_s: float,
+                 entry_mode: str = "momentum", tp_mult: float = 2.0) -> None:
         for name, v in (("entry_threshold", entry_threshold), ("trail_threshold", trail_threshold),
                         ("opposing_threshold", opposing_threshold), ("atr_stop_mult", atr_stop_mult),
                         ("opposing_distance_bps", opposing_distance_bps), ("risk_pct", risk_pct),
                         ("max_leverage", max_leverage), ("entry_offset_bps", entry_offset_bps),
                         ("stop_offset_bps", stop_offset_bps), ("entry_zone_bps", entry_zone_bps),
-                        ("pending_timeout_s", pending_timeout_s)):
+                        ("pending_timeout_s", pending_timeout_s), ("tp_mult", tp_mult)):
             if not (v > 0):
                 raise ValueError(f"SignalEngine: {name} must be positive, got {v}")
+        if entry_mode not in ("momentum", "reversion"):
+            raise ValueError(f"SignalEngine: entry_mode must be 'momentum' or 'reversion', got {entry_mode!r}")
         self.entry_threshold = entry_threshold
         self.trail_threshold = trail_threshold
         self.opposing_threshold = opposing_threshold
@@ -44,10 +47,13 @@ class SignalEngine:
         self.max_leverage = max_leverage
         self.entry_zone_bps = entry_zone_bps
         self.pending_timeout_s = pending_timeout_s
+        self.entry_mode = entry_mode
+        self.tp_mult = tp_mult
         self.state = "IDLE"
         self._thesis: Zone | None = None
         self._dir: str | None = None
         self._armed_ts = 0.0
+        self._tp = 0.0
 
     def update(self, analysis: DepthAnalysis, atr: float, broker) -> None:
         price = analysis.mid
@@ -68,11 +74,17 @@ class SignalEngine:
             return
 
         if self.state == "IDLE":
-            self._maybe_enter(analysis, price, atr, broker)
-        elif self.state == "PENDING_ENTRY":
+            if self.entry_mode == "reversion":
+                self._maybe_enter_reversion(analysis, price, atr, broker)
+            else:
+                self._maybe_enter(analysis, price, atr, broker)
+        elif self.state == "PENDING_ENTRY":          # momentum-only
             self._maybe_cancel(analysis, broker)
         elif self.state == "IN_POSITION":
-            self._manage(analysis, price, atr, pos, broker)
+            if self.entry_mode == "reversion":
+                self._manage_reversion(analysis, price, broker)
+            else:
+                self._manage(analysis, price, atr, pos, broker)
 
     def _operable(self, z: Zone) -> bool:
         return (z.confidence >= self.entry_threshold and z.persistence_s >= self.min_persistence_s
@@ -126,6 +138,49 @@ class SignalEngine:
                        and (z.low - price) <= tol for z in analysis.resistances)
         return any(z.confidence >= self.opposing_threshold and z.high < price
                    and (price - z.high) <= tol for z in analysis.supports)
+
+    def _maybe_enter_reversion(self, analysis: DepthAnalysis, price: float, atr: float, broker) -> None:
+        """Mean-reversion bounce: enter MARKET at a near strong support (LONG) or
+        resistance (SHORT) within ``entry_zone_bps``, stop beyond the zone (ATR-floored),
+        take-profit at ``tp_mult`` x the risk distance. No pending state — IDLE -> IN_POSITION."""
+        zone_tol = price * self.entry_zone_bps / 1e4
+        best: Zone | None = None
+        best_dir: str | None = None
+        for z in analysis.supports:                  # LONG: bounce up off a near support below
+            if (self._operable(z) and z.high < price and (price - z.high) <= zone_tol
+                    and (best is None or z.confidence > best.confidence)):
+                best, best_dir = z, "LONG"
+        for z in analysis.resistances:               # SHORT: fade down off a near resistance above
+            if (self._operable(z) and z.low > price and (z.low - price) <= zone_tol
+                    and (best is None or z.confidence > best.confidence)):
+                best, best_dir = z, "SHORT"
+        if best is None:
+            return
+        if best_dir == "LONG":
+            stop = min(best.low * (1 - self.stop_offset_bps / 1e4), price - atr * self.atr_stop_mult)
+            ok = 0.0 < stop < price
+        else:
+            stop = max(best.high * (1 + self.stop_offset_bps / 1e4), price + atr * self.atr_stop_mult)
+            ok = stop > price > 0.0
+        if not ok:
+            return
+        size = position_size(broker.equity(), entry=price, stop=stop,
+                             risk_pct=self.risk_pct, max_leverage=self.max_leverage)
+        if size <= 0:
+            return
+        risk = abs(price - stop)
+        self._tp = price + self.tp_mult * risk if best_dir == "LONG" else price - self.tp_mult * risk
+        broker.enter_market(best_dir, stop=stop, size=size, ts=analysis.ts)
+        self.state, self._thesis, self._dir = "IN_POSITION", best, best_dir
+
+    def _manage_reversion(self, analysis: DepthAnalysis, price: float, broker) -> None:
+        pos = broker.position()
+        if pos is None:
+            return
+        hit_tp = price >= self._tp if pos.side == "LONG" else price <= self._tp
+        if hit_tp:
+            broker.close(ts=analysis.ts)
+            self.state, self._thesis, self._dir = "IDLE", None, None
 
     def _thesis_present(self, analysis: DepthAnalysis) -> bool:
         zones = analysis.supports if self._dir == "LONG" else analysis.resistances

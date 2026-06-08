@@ -189,3 +189,60 @@ def test_does_not_exit_on_the_fill_tick():
     assert e.state == "IN_POSITION" and bk.position() is not None
     e.update(_analysis(3.0, mid=101.0, supports=[sup], resistances=[res]), atr=1.0, broker=bk)  # now exits
     assert e.state == "IDLE" and bk.position() is None
+
+
+# --- reversion (mean-reversion bounce) entry mode -----------------------------
+
+def _rev_engine(**over):
+    kw = dict(entry_threshold=0.5, trail_threshold=0.5, opposing_threshold=0.7,
+              min_persistence_s=0.0, min_venues=1, entry_offset_bps=2.0, stop_offset_bps=5.0,
+              atr_stop_mult=3.0, opposing_distance_bps=8.0, risk_pct=0.01, max_leverage=10.0,
+              entry_zone_bps=50.0, pending_timeout_s=10.0, entry_mode="reversion", tp_mult=2.0)
+    kw.update(over)
+    return SignalEngine(**kw)
+
+
+def test_reversion_enters_market_at_near_support_with_bracket():
+    eng, broker = _rev_engine(), _bk()
+    # price just above a strong support -> reversion enters LONG market immediately
+    sup = _zone(Side.SUPPORT, price=99.7, low=99.6, high=99.8, conf=0.9, persistence_s=30,
+                venues=("k", "b", "o"))
+    eng.update(_analysis(1.0, mid=100.0, supports=[sup]), atr=0.5, broker=broker)
+    pos = broker.position()
+    assert pos is not None and pos.side == "LONG"      # entered immediately (no pending)
+    assert eng.state == "IN_POSITION"
+    assert pos.stop < pos.entry                        # stop below
+    # take-profit recorded at tp_mult x risk above entry
+    risk = pos.entry - pos.stop
+    assert abs(eng._tp - (pos.entry + 2.0 * risk)) < 1e-6
+
+
+def test_reversion_takes_profit_at_r_multiple():
+    eng, broker = _rev_engine(), _bk()
+    sup = _zone(Side.SUPPORT, price=99.7, low=99.6, high=99.8, conf=0.9, persistence_s=30,
+                venues=("k", "b"))
+    eng.update(_analysis(1.0, mid=100.0, supports=[sup]), atr=0.5, broker=broker)
+    tp = eng._tp
+    # next snapshot: price reaches the TP -> exit via close (not stop), back to IDLE
+    eng.update(_analysis(2.0, mid=tp + 0.1, supports=[sup]), atr=0.5, broker=broker)
+    assert broker.position() is None and eng.state == "IDLE"
+    assert broker.trades()[-1].reason == "close" and broker.trades()[-1].pnl > 0
+
+
+def test_reversion_does_not_arm_without_near_support():
+    eng, broker = _rev_engine(), _bk()
+    far = _zone(Side.SUPPORT, price=95.1, low=95.0, high=95.2, conf=0.9, persistence_s=30,
+                venues=("k", "b"))   # far below (> entry_zone)
+    eng.update(_analysis(1.0, mid=100.0, supports=[far]), atr=0.5, broker=broker)
+    assert broker.position() is None and eng.state == "IDLE"
+
+
+def test_reversion_does_not_exit_on_entry_tick():
+    # the entry tick must NOT also exit even if price is already at/above the TP zone:
+    # entry happens after on_price; TP is only evaluated on the NEXT tick.
+    eng, broker = _rev_engine(), _bk()
+    sup = _zone(Side.SUPPORT, price=99.7, low=99.6, high=99.8, conf=0.9, persistence_s=30,
+                venues=("k", "b"))
+    eng.update(_analysis(1.0, mid=100.0, supports=[sup]), atr=0.5, broker=broker)
+    assert eng.state == "IN_POSITION" and broker.position() is not None
+    assert broker.trades() == []                       # no round-trip on the entry tick
