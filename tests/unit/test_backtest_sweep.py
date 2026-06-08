@@ -40,3 +40,13 @@ def test_walk_forward_reports_in_and_out_of_sample():
     f = folds[0]
     assert "is_result" in f and "oos_result" in f and "config" in f
     assert f["is_result"].n_snapshots > 0 and f["oos_result"].n_snapshots > 0
+
+
+def test_format_result_line_is_readable():
+    from pavilos.backtest.runner import BacktestResult
+    from scripts.backtest import format_result
+    r = BacktestResult(n_snapshots=1000, n_trades=12, wins=7, losses=5, win_rate=58.33,
+                       realized_pnl=123.45, fees=20.0, return_pct=1.2345, final_equity=10123.45,
+                       max_drawdown=80.0, max_drawdown_pct=0.79)
+    s = format_result(r)
+    assert "trades=12" in s and "win=58.3%" in s and "ret=+1.23%" in s and "maxDD=" in s
