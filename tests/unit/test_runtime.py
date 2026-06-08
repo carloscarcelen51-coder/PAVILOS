@@ -17,8 +17,8 @@ class _FakeConnector:
 def test_build_wires_full_graph_with_injected_connectors():
     built = {}
     rt = Runtime.build(RuntimeConfig(), connector_factory=lambda v, sym: _FakeConnector(v))
-    # all 12 venues wired; the trading engine has the dashboard observer
-    assert len(rt.engine._connectors) == 12
+    # all 14 venues wired; the trading engine has the dashboard observer
+    assert len(rt.engine._connectors) == 14
     assert rt.trading_engine.observer is not None
     assert rt.state.snapshot()["state"] == "IDLE"
 

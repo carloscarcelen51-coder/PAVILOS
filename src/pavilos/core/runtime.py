@@ -26,7 +26,8 @@ _log = logging.getLogger(__name__)
 _SYMBOLS = {"kraken": "BTC/USD", "binance": "BTCUSDT", "coinbase": "BTC-USD",
             "okx": "BTC-USDT", "bybit": "BTCUSDT", "bitstamp": "btcusd",
             "gate": "BTC/USDT", "mexc": "BTC/USDT", "cryptocom": "BTC/USDT",
-            "bitget": "BTC/USDT", "kucoin": "BTC/USDT", "htx": "BTC/USDT"}
+            "bitget": "BTC/USDT", "kucoin": "BTC/USDT", "htx": "BTC/USDT",
+            "bitfinex": "BTC/USD", "gemini": "BTC/USD"}
 
 
 def _wall_now() -> float:

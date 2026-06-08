@@ -32,12 +32,15 @@ VENUE_SPECS: tuple[VenueSpec, ...] = (
     VenueSpec("bitget", Quote.USDT, Tier.A),
     VenueSpec("kucoin", Quote.USDT, Tier.A),
     VenueSpec("htx", Quote.USDT, Tier.A),
+    VenueSpec("bitfinex", Quote.USD, Tier.A),   # deep institutional USD book
+    VenueSpec("gemini", Quote.USD, Tier.A),     # regulated US, very deep USD book
 )
 
 # Staggered startup (seconds) for the ccxt venues so they don't all run
 # load_markets + open a websocket at the same instant (which storms the host and
 # times out / rate-limits the slower ones). Fast venues first, slow ones later.
-_CCXT_STAGGER = {"gate": 0.0, "mexc": 1.0, "htx": 2.0, "cryptocom": 3.0, "bitget": 4.0, "kucoin": 5.0}
+_CCXT_STAGGER = {"gate": 0.0, "mexc": 1.0, "htx": 2.0, "cryptocom": 3.0, "bitget": 4.0,
+                 "kucoin": 5.0, "bitfinex": 6.0, "gemini": 7.0}
 
 # Per-venue ccxt config overrides. Bitget's local-checksum verification hits a ccxt
 # bug (handle_check_sum_error -> UnsubscribeError) that kills its book on the 2nd
