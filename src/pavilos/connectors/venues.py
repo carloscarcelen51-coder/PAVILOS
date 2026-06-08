@@ -39,6 +39,11 @@ VENUE_SPECS: tuple[VenueSpec, ...] = (
 # times out / rate-limits the slower ones). Fast venues first, slow ones later.
 _CCXT_STAGGER = {"gate": 0.0, "mexc": 1.0, "htx": 2.0, "cryptocom": 3.0, "bitget": 4.0, "kucoin": 5.0}
 
+# Per-venue ccxt config overrides. Bitget's local-checksum verification hits a ccxt
+# bug (handle_check_sum_error -> UnsubscribeError) that kills its book on the 2nd
+# update and reconnect-storms (starving the other ccxt venues); disable it.
+_CCXT_OPTIONS = {"bitget": {"options": {"watchOrderBook": {"checksum": False}}}}
+
 
 def _coinbase_connect(symbol: str):
     async def connect() -> AsyncIterator[dict]:
@@ -106,5 +111,6 @@ def build_connector(venue: str, symbol: str):
     if venue in _CCXT_STAGGER:
         # stagger the ccxt connects: all 6 doing load_markets + WS at once storms the
         # host (slow venues time out / get rate-limited); spread them over a few seconds.
-        return CcxtConnector(venue, symbol, startup_delay=_CCXT_STAGGER[venue])
+        return CcxtConnector(venue, symbol, startup_delay=_CCXT_STAGGER[venue],
+                             ccxt_options=_CCXT_OPTIONS.get(venue))
     raise KeyError(f"unknown venue {venue!r}")

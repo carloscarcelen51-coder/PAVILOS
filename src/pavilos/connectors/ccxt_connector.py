@@ -26,7 +26,8 @@ class CcxtConnector:
                  make_exchange: Callable[[], object] | None = None,
                  now: Callable[[], float] | None = None,
                  sleep: Callable[[float], Awaitable[None]] | None = None,
-                 max_backoff: float = 30.0, startup_delay: float = 0.0) -> None:
+                 max_backoff: float = 30.0, startup_delay: float = 0.0,
+                 ccxt_options: dict | None = None) -> None:
         self.exchange = exchange_id
         self.symbol = symbol
         self._make_exchange = make_exchange or self._default_make_exchange
@@ -34,6 +35,7 @@ class CcxtConnector:
         self._sleep = sleep or asyncio.sleep
         self._max_backoff = max_backoff
         self._startup_delay = startup_delay   # stagger concurrent ccxt connects to avoid a load_markets storm
+        self._ccxt_options = ccxt_options or {}   # per-venue ccxt config (e.g. bitget checksum off)
         self._resyncs = 0
         self._errors = 0
         self._last_update_ts = 0.0
@@ -90,7 +92,7 @@ class CcxtConnector:
     def _default_make_exchange(self) -> object:
         import ccxt.pro  # imported lazily so unit tests never need ccxt
         import aiohttp
-        ex = getattr(ccxt.pro, self.exchange)({"enableRateLimit": True})
+        ex = getattr(ccxt.pro, self.exchange)({"enableRateLimit": True, **self._ccxt_options})
         # aiodns (aiohttp's default async resolver) is unreliable on this host
         # ("Could not contact DNS servers"); give ccxt an aiohttp session using the
         # stdlib ThreadedResolver so its REST (load_markets) + WS DNS both resolve.
