@@ -12,8 +12,7 @@ from dataclasses import dataclass, field
 from pavilos.aggregator.aggregator import Aggregator
 from pavilos.aggregator.normalize import PegProvider
 from pavilos.core.engine import Engine
-from pavilos.connectors.venues import VENUE_SPECS, build_connector, NATIVE_VENUES, CCXT_VENUES
-from pavilos.connectors.ccxt_pool import CcxtPoolConnector
+from pavilos.connectors.venues import VENUE_SPECS, build_connector
 from pavilos.detection.detector import Detector
 from pavilos.signals.atr import ATR
 from pavilos.signals.engine import SignalEngine
@@ -49,7 +48,6 @@ class RuntimeConfig:
                                        # 10Hz was wasted CPU and a 2x-bigger synchronous build_combined
                                        # block per tick (which was starving the ccxt WS keepalives).
     atr_window: int = 50
-    isolate_ccxt: bool = True   # run the ccxt venues in a separate process (own event loop) so the main loop can't starve their WS keepalives
     host: str = "127.0.0.1"
     port: int = 8800
     # detector
@@ -95,13 +93,7 @@ class Runtime:
     def build(cls, config: RuntimeConfig, *,
               connector_factory: Callable[[str, str], object] = build_connector,
               now: Callable[[], float] = _wall_now) -> "Runtime":
-        if config.isolate_ccxt:
-            native = [connector_factory(v, config.symbols[v])
-                      for v in config.symbols if v in NATIVE_VENUES]
-            ccxt_syms = {v: config.symbols[v] for v in config.symbols if v in CCXT_VENUES}
-            connectors = native + ([CcxtPoolConnector(ccxt_syms)] if ccxt_syms else [])
-        else:
-            connectors = [connector_factory(v, config.symbols[v]) for v in config.symbols]
+        connectors = [connector_factory(v, config.symbols[v]) for v in config.symbols]
         agg = Aggregator(list(VENUE_SPECS), PegProvider(), bin_bps=config.bin_bps,
                          window_bps=config.window_bps, staleness_s=config.staleness_s)
         engine = Engine(connectors, agg, interval_s=config.snapshot_interval_s)

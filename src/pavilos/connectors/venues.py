@@ -34,9 +34,6 @@ VENUE_SPECS: tuple[VenueSpec, ...] = (
     VenueSpec("htx", Quote.USDT, Tier.A),
 )
 
-NATIVE_VENUES = ("kraken", "binance", "coinbase", "okx", "bybit", "bitstamp")
-CCXT_VENUES = ("gate", "mexc", "cryptocom", "bitget", "kucoin", "htx")
-
 # Staggered startup (seconds) for the ccxt venues so they don't all run
 # load_markets + open a websocket at the same instant (which storms the host and
 # times out / rate-limits the slower ones). Fast venues first, slow ones later.

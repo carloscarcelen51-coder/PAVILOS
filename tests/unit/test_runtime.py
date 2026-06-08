@@ -15,49 +15,12 @@ class _FakeConnector:
 
 
 def test_build_wires_full_graph_with_injected_connectors():
-    # With isolate_ccxt disabled the factory builds all 12 venues in-process.
-    rt = Runtime.build(RuntimeConfig(isolate_ccxt=False),
-                       connector_factory=lambda v, sym: _FakeConnector(v))
+    built = {}
+    rt = Runtime.build(RuntimeConfig(), connector_factory=lambda v, sym: _FakeConnector(v))
     # all 12 venues wired; the trading engine has the dashboard observer
     assert len(rt.engine._connectors) == 12
     assert rt.trading_engine.observer is not None
     assert rt.state.snapshot()["state"] == "IDLE"
-
-
-def test_build_isolates_ccxt_into_pool_by_default():
-    from pavilos.core.runtime import Runtime, RuntimeConfig
-    from pavilos.connectors.ccxt_pool import CcxtPoolConnector
-
-    built = []
-    def fake_factory(v, s):
-        class _C:
-            exchange = v
-            def health(self): ...
-            async def run(self, q, st): ...
-        built.append(v); return _C()
-
-    rt = Runtime.build(RuntimeConfig(), connector_factory=fake_factory)
-    conns = rt.engine._connectors
-    pools = [c for c in conns if isinstance(c, CcxtPoolConnector)]
-    assert len(pools) == 1
-    assert set(pools[0]._venue_symbols) == {"gate", "mexc", "cryptocom", "bitget", "kucoin", "htx"}
-    # the injected factory was used for the 6 native venues only
-    assert set(built) == {"kraken", "binance", "coinbase", "okx", "bybit", "bitstamp"}
-    assert len(conns) == 7
-
-def test_build_in_process_ccxt_when_isolate_disabled():
-    from pavilos.core.runtime import Runtime, RuntimeConfig
-    from pavilos.connectors.ccxt_pool import CcxtPoolConnector
-    def fake_factory(v, s):
-        class _C:
-            exchange = v
-            def health(self): ...
-            async def run(self, q, st): ...
-        return _C()
-    rt = Runtime.build(RuntimeConfig(isolate_ccxt=False), connector_factory=fake_factory)
-    conns = rt.engine._connectors
-    assert not any(isinstance(c, CcxtPoolConnector) for c in conns)
-    assert len(conns) == 12
 
 
 def test_observer_feeds_wall_clock_not_feed_ts():
