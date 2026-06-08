@@ -76,8 +76,9 @@ class RuntimeConfig:
     max_leverage: float = 10.0
     entry_zone_bps: float = 30.0       # only trade a support/resistance when price is within this of it
     pending_timeout_s: float = 10.0    # cancel a pending entry that has not filled in this long
-    # raw-L2 data layer (opt-in: recording is OFF unless book_data_dir is set)
-    book_data_dir: str | None = None
+    # raw-L2 data layer. Recording is ON, writing ONLY inside this new D: folder
+    # (never touches other files on D:). 7-day retention keeps the disk bounded.
+    book_data_dir: str | None = r"D:\pavilos_book_data"
     book_flush_interval_s: float = 5.0
     book_retention_days: int = 7
 
