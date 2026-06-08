@@ -38,7 +38,9 @@ class RuntimeConfig:
     starting_equity: float = 10_000.0
     trade_log_path: str = "paper_trades.jsonl"
     bin_bps: float = 5.0
-    window_bps: float = 50.0
+    window_bps: float = 300.0   # ±3% aggregate window — calibrated 2026-06-07 from a live probe:
+                                # ±50bps was too tight (flat book -> no walls stood out -> 0 zones -> 0 trades);
+                                # at ±300bps the top bin is ~36x the median and zones surface every snapshot.
     staleness_s: float = 15.0
     atr_window: int = 50
     host: str = "127.0.0.1"
@@ -50,7 +52,7 @@ class RuntimeConfig:
     max_zone_width_bps: float = 50.0
     match_overlap_bps: float = 10.0
     grace_s: float = 2.0
-    det_window_bps: float = 200.0
+    det_window_bps: float = 300.0   # proximity scale to match the aggregate window (probe: conf p90~0.93)
     persistence_target_s: float = 30.0
     venues_target: float = 3.0
     strength_target: float = 15.0

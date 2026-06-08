@@ -37,3 +37,4 @@ secrets/
 Thumbs.db
 .idea/
 .vscode/
+calibration_probe.jsonl
