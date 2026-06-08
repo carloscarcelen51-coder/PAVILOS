@@ -65,7 +65,8 @@ class RuntimeConfig:
     entry_offset_bps: float = 2.0
     stop_offset_bps: float = 5.0
     atr_stop_mult: float = 3.0
-    opposing_distance_bps: float = 30.0
+    opposing_distance_bps: float = 8.0    # "at the opposing wall" — tight vs the ~60bps zone spacing so
+                                          # entries find room and exits fire only when price truly reaches it
     risk_pct: float = 0.01
     max_leverage: float = 10.0
     entry_zone_bps: float = 30.0       # only trade a support/resistance when price is within this of it
