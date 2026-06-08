@@ -26,13 +26,14 @@ class CcxtConnector:
                  make_exchange: Callable[[], object] | None = None,
                  now: Callable[[], float] | None = None,
                  sleep: Callable[[float], Awaitable[None]] | None = None,
-                 max_backoff: float = 30.0) -> None:
+                 max_backoff: float = 30.0, startup_delay: float = 0.0) -> None:
         self.exchange = exchange_id
         self.symbol = symbol
         self._make_exchange = make_exchange or self._default_make_exchange
         self._now = now or _wall_now
         self._sleep = sleep or asyncio.sleep
         self._max_backoff = max_backoff
+        self._startup_delay = startup_delay   # stagger concurrent ccxt connects to avoid a load_markets storm
         self._resyncs = 0
         self._errors = 0
         self._last_update_ts = 0.0
@@ -43,6 +44,11 @@ class CcxtConnector:
                                self._resyncs, self._errors)
 
     async def run(self, out_q: "asyncio.Queue[BookUpdate]", stop: "asyncio.Event") -> None:
+        if self._startup_delay > 0 and not stop.is_set():
+            try:                                  # stagger startup (stop-aware) so the ccxt
+                await asyncio.wait_for(stop.wait(), timeout=self._startup_delay)  # venues don't all
+            except asyncio.TimeoutError:          # load_markets + WS-connect at the same instant
+                pass
         backoff = 1.0
         while not stop.is_set():
             ex = None

@@ -34,6 +34,11 @@ VENUE_SPECS: tuple[VenueSpec, ...] = (
     VenueSpec("htx", Quote.USDT, Tier.A),
 )
 
+# Staggered startup (seconds) for the ccxt venues so they don't all run
+# load_markets + open a websocket at the same instant (which storms the host and
+# times out / rate-limits the slower ones). Fast venues first, slow ones later.
+_CCXT_STAGGER = {"gate": 0.0, "mexc": 1.0, "htx": 2.0, "cryptocom": 3.0, "bitget": 4.0, "kucoin": 5.0}
+
 
 def _coinbase_connect(symbol: str):
     async def connect() -> AsyncIterator[dict]:
@@ -98,6 +103,8 @@ def build_connector(venue: str, symbol: str):
         return SnapshotDeltaConnector("okx", OKXFeed, connect=_okx_connect(symbol))
     if venue == "bybit":
         return SnapshotDeltaConnector("bybit", BybitFeed, connect=_bybit_connect(symbol))
-    if venue in ("gate", "mexc", "cryptocom", "bitget", "kucoin", "htx"):
-        return CcxtConnector(venue, symbol)
+    if venue in _CCXT_STAGGER:
+        # stagger the ccxt connects: all 6 doing load_markets + WS at once storms the
+        # host (slow venues time out / get rate-limited); spread them over a few seconds.
+        return CcxtConnector(venue, symbol, startup_delay=_CCXT_STAGGER[venue])
     raise KeyError(f"unknown venue {venue!r}")
