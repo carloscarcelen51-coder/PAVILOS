@@ -114,7 +114,9 @@ class BitstampConnector:
         return gen()
 
     async def _default_fetch_snapshot(self) -> dict:
-        async with aiohttp.ClientSession() as session:
+        # aiodns is unreliable on this host; force aiohttp's stdlib ThreadedResolver
+        connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(f"{self._rest_url}/{self.symbol}/", proxy=self._proxy) as resp:
                 resp.raise_for_status()
                 return await resp.json()

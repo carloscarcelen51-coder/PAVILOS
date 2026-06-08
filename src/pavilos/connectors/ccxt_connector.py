@@ -83,7 +83,13 @@ class CcxtConnector:
 
     def _default_make_exchange(self) -> object:
         import ccxt.pro  # imported lazily so unit tests never need ccxt
-        return getattr(ccxt.pro, self.exchange)({"enableRateLimit": True})
+        import aiohttp
+        ex = getattr(ccxt.pro, self.exchange)({"enableRateLimit": True})
+        # aiodns (aiohttp's default async resolver) is unreliable on this host
+        # ("Could not contact DNS servers"); give ccxt an aiohttp session using the
+        # stdlib ThreadedResolver so its REST (load_markets) + WS DNS both resolve.
+        ex.session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver()))
+        return ex
 
 
 async def _close_exchange(ex: object) -> None:
