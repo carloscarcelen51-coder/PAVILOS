@@ -8,6 +8,7 @@ dependencies = [
     "aiohttp>=3.9",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
+    "ccxt>=4.4",
 ]
 
 [project.optional-dependencies]
