@@ -246,3 +246,29 @@ def test_reversion_does_not_exit_on_entry_tick():
     eng.update(_analysis(1.0, mid=100.0, supports=[sup]), atr=0.5, broker=broker)
     assert eng.state == "IN_POSITION" and broker.position() is not None
     assert broker.trades() == []                       # no round-trip on the entry tick
+
+
+def test_reversion_tp_exit_clears_tp_state():
+    # on a TP-exit the engine must clear ALL per-trade state, including _tp, not just
+    # _thesis/_dir (uniform 'clear per-trade state on exit' invariant)
+    eng, broker = _rev_engine(), _bk()
+    sup = _zone(Side.SUPPORT, price=99.7, low=99.6, high=99.8, conf=0.9, persistence_s=30,
+                venues=("k", "b"))
+    eng.update(_analysis(1.0, mid=100.0, supports=[sup]), atr=0.5, broker=broker)
+    tp = eng._tp
+    eng.update(_analysis(2.0, mid=tp + 0.1, supports=[sup]), atr=0.5, broker=broker)  # TP-exit
+    assert eng.state == "IDLE" and broker.position() is None
+    assert eng._tp == 0.0 and eng._thesis is None and eng._dir is None
+
+
+def test_reversion_stop_out_clears_tp_state():
+    # a broker stop-out (IN_POSITION->IDLE sync in update()) must also clear _tp
+    eng, broker = _rev_engine(), _bk()
+    sup = _zone(Side.SUPPORT, price=99.7, low=99.6, high=99.8, conf=0.9, persistence_s=30,
+                venues=("k", "b"))
+    eng.update(_analysis(1.0, mid=100.0, supports=[sup]), atr=0.5, broker=broker)
+    assert eng.state == "IN_POSITION"
+    stop = broker.position().stop
+    eng.update(_analysis(2.0, mid=stop - 0.5, supports=[]), atr=0.5, broker=broker)  # stop-out
+    assert eng.state == "IDLE" and broker.position() is None
+    assert eng._tp == 0.0 and eng._thesis is None and eng._dir is None

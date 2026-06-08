@@ -10,7 +10,14 @@ zone as the protective stop, and gated so it is a real bounce, not noise:
 The initial stop sits beyond the zone but never tighter than ``atr_stop_mult`` x
 ATR from price (anti-whipsaw). A pending entry is withdrawn if the thesis zone
 vanishes OR it has not filled within ``pending_timeout_s`` (avoids stale orders).
-Long off supports, short off resistances (mirrored). One position at a time."""
+Long off supports, short off resistances (mirrored). One position at a time.
+
+With ``entry_mode="reversion"`` the engine trades the bounce instead: at a near
+support/resistance within ``entry_zone_bps`` it enters MARKET immediately (LONG
+off support, SHORT off resistance), so it skips PENDING_ENTRY and goes straight
+IDLE -> IN_POSITION. The stop sits beyond the zone, ATR-floored as above, and a
+take-profit is recorded at ``tp_mult`` x the risk distance from entry; the trade
+exits on the next snapshot that reaches that take-profit (or on a broker stop-out)."""
 from __future__ import annotations
 
 from pavilos.detection.models import DepthAnalysis, Zone
@@ -70,7 +77,7 @@ class SignalEngine:
             # position closed by the broker (stop-out) -> back to IDLE, and defer
             # any new setup to the NEXT snapshot (no same-tick whipsaw re-entry;
             # consistent with the discretionary-exit path, which also re-arms next tick)
-            self.state, self._thesis, self._dir = "IDLE", None, None
+            self.state, self._thesis, self._dir, self._tp = "IDLE", None, None, 0.0
             return
 
         if self.state == "IDLE":
@@ -90,7 +97,10 @@ class SignalEngine:
         return (z.confidence >= self.entry_threshold and z.persistence_s >= self.min_persistence_s
                 and len(z.venues) >= self.min_venues)
 
-    def _maybe_enter(self, analysis: DepthAnalysis, price: float, atr: float, broker) -> None:
+    def _best_near_zone(self, analysis: DepthAnalysis, price: float) -> tuple[Zone | None, str | None]:
+        """Highest-confidence operable zone NEAR the price (within ``entry_zone_bps``):
+        a support just BELOW (-> LONG) or a resistance just ABOVE (-> SHORT). Shared by
+        the momentum and reversion entry paths so the zone gate cannot drift between them."""
         zone_tol = price * self.entry_zone_bps / 1e4
         best: Zone | None = None
         best_dir: str | None = None
@@ -102,6 +112,10 @@ class SignalEngine:
             if (self._operable(z) and z.low > price and (z.low - price) <= zone_tol
                     and (best is None or z.confidence > best.confidence)):
                 best, best_dir = z, "SHORT"
+        return best, best_dir
+
+    def _maybe_enter(self, analysis: DepthAnalysis, price: float, atr: float, broker) -> None:
+        best, best_dir = self._best_near_zone(analysis, price)
         if best is None:
             return
         if self._opposing_near(analysis, price, best_dir):
@@ -143,17 +157,7 @@ class SignalEngine:
         """Mean-reversion bounce: enter MARKET at a near strong support (LONG) or
         resistance (SHORT) within ``entry_zone_bps``, stop beyond the zone (ATR-floored),
         take-profit at ``tp_mult`` x the risk distance. No pending state — IDLE -> IN_POSITION."""
-        zone_tol = price * self.entry_zone_bps / 1e4
-        best: Zone | None = None
-        best_dir: str | None = None
-        for z in analysis.supports:                  # LONG: bounce up off a near support below
-            if (self._operable(z) and z.high < price and (price - z.high) <= zone_tol
-                    and (best is None or z.confidence > best.confidence)):
-                best, best_dir = z, "LONG"
-        for z in analysis.resistances:               # SHORT: fade down off a near resistance above
-            if (self._operable(z) and z.low > price and (z.low - price) <= zone_tol
-                    and (best is None or z.confidence > best.confidence)):
-                best, best_dir = z, "SHORT"
+        best, best_dir = self._best_near_zone(analysis, price)
         if best is None:
             return
         if best_dir == "LONG":
@@ -180,7 +184,7 @@ class SignalEngine:
         hit_tp = price >= self._tp if pos.side == "LONG" else price <= self._tp
         if hit_tp:
             broker.close(ts=analysis.ts)
-            self.state, self._thesis, self._dir = "IDLE", None, None
+            self.state, self._thesis, self._dir, self._tp = "IDLE", None, None, 0.0
 
     def _thesis_present(self, analysis: DepthAnalysis) -> bool:
         zones = analysis.supports if self._dir == "LONG" else analysis.resistances
