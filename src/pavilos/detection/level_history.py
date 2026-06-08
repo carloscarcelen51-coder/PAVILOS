@@ -11,11 +11,12 @@ Semantics
 at time ``ts``. A run of touches at ~the same price band, separated from the
 next run by more than ``episode_gap_s``, is one *episode*.
 
-``touches(level, now)`` counts the DISTINCT PAST episodes whose price is within
-``band_bps`` of ``level`` and which **ended before** ``now``. It is strictly
-causal: observations with ``ts >= now`` are ignored (no look-ahead). So at any
-time T it reports only how many times this level was respected in the past —
-data <= T only.
+``touches(level, now)`` counts the DISTINCT past-or-ongoing episodes whose price
+is within ``band_bps`` of ``level`` and whose **last touch is strictly before**
+``now``. It is strictly causal: observations with ``ts >= now`` are ignored (no
+look-ahead). So at any time T it reports only how many times this level was
+respected up to T — data < T only. (An episode still being touched right up to
+``now`` is counted; "ongoing" here just means its last touch is < ``now``.)
 """
 from __future__ import annotations
 
@@ -35,11 +36,13 @@ class LevelHistory:
         self._obs.append((ts, price_level))
 
     def touches(self, level: float, now: float) -> int:
-        """Count DISTINCT past episodes within ``band_bps`` of ``level`` that
-        ended before ``now``. Causal: ignores observations with ``ts >= now``.
+        """Count DISTINCT past-or-ongoing episodes within ``band_bps`` of
+        ``level`` whose last touch is strictly before ``now``. Causal: ignores
+        observations with ``ts >= now``.
 
         An episode is a gap-separated run (> ``episode_gap_s``) of band-matched
-        touches. Only episodes whose last touch is strictly before ``now`` count.
+        touches. The ``ts < now`` prefilter already guarantees every grouped
+        episode's last touch is < ``now``, so the episode count IS the answer.
         """
         band = level * self.band_bps / 1e4
         # Causal + band filter, ordered by time. Each observation is "past"
@@ -50,15 +53,11 @@ class LevelHistory:
         )
         if not matched:
             return 0
-        # Group band-matched touches into gap-separated episodes.
-        episodes: list[tuple[float, float]] = []  # (first_ts, last_ts)
-        ep_start = ep_end = matched[0]
+        # Count gap-separated episodes: start at 1, increment on each gap.
+        episodes = 1
+        prev = matched[0]
         for ts in matched[1:]:
-            if ts - ep_end > self.episode_gap_s:
-                episodes.append((ep_start, ep_end))
-                ep_start = ts
-            ep_end = ts
-        episodes.append((ep_start, ep_end))
-        # Count distinct episodes that ended before `now`. All matched touches
-        # are already < now, so every grouped episode qualifies.
-        return sum(1 for _start, end in episodes if end < now)
+            if ts - prev > self.episode_gap_s:
+                episodes += 1
+            prev = ts
+        return episodes

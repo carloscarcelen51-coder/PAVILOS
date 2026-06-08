@@ -70,12 +70,19 @@ def format_mode_row(mode: str, folds: list) -> str:
 
 def format_study_row(row: dict) -> str:
     """One readable per-bucket line: confluence-score range (the bucket label),
-    episode N, bounce%, expectancy in R, and mean forward return in bps."""
-    return (f"  {row['bucket']:<14} n={row['n']:<4} "
+    episode N (with undecided count), bounce%, expectancy in R (decided-only),
+    the historical-touch expectancy split, and mean forward return in bps."""
+    und = row.get("n_undecided", 0)
+    und_str = f"(und={und}) " if und else ""
+    touch = ""
+    if "expectancy_r_with_touches" in row:
+        touch = (f"  expR[touch={row['expectancy_r_with_touches']:+.2f} "
+                 f"none={row['expectancy_r_no_touches']:+.2f}]")
+    return (f"  {row['bucket']:<14} n={row['n']:<4} {und_str}"
             f"bounce={row['bounce_rate']*100:.0f}%  "
             f"exp_R={row['expectancy_r']:+.2f}  "
             f"mfe_R={row['mean_mfe_r']:+.2f} mae_R={row['mean_mae_r']:+.2f}  "
-            f"fwd={row['mean_fwd_return_bps']:+.1f}bps")
+            f"fwd={row['mean_fwd_return_bps']:+.1f}bps{touch}")
 
 
 def main() -> None:
@@ -142,19 +149,27 @@ def main() -> None:
         obs = study_observations(snaps, study_cfg, runtime=base_cfg)
         rows = summarize_study(obs, study_cfg.buckets, target_r=study_cfg.target_r)
         n_episodes = len(obs)
+        n_undecided = sum(1 for o in obs if not o.decided)
+        n_decided = n_episodes - n_undecided
         print(f"=== confluence forward-return study, horizon={horizon_s:.0f}s, "
               f"{len(snaps)} snapshots @ window={base_cfg.window_bps} ===")
         print(f"    target_R={study_cfg.target_r}  entry_zone={study_cfg.entry_zone_bps:.0f}bps  "
-              f"episode_gap={study_cfg.episode_gap_s:.0f}s  -> {n_episodes} independent episodes")
+              f"episode_gap={study_cfg.episode_gap_s:.0f}s  -> {n_episodes} independent episodes "
+              f"({n_decided} decided, {n_undecided} undecided/horizon-clipped EXCLUDED from exp_R)")
         for row in rows:
             if row["bucket"] == "ALL":
                 print("  --- baseline ---")
             print(format_study_row(row))
-        print(f"  >>> total episode N = {n_episodes}  "
-              f"(does bounce-rate / expectancy_r RISE with score AND beat baseline?)")
-        if n_episodes < 30:
-            print("  WARNING: small N (< 30 episodes) -- bucket rates are NOISE; "
-                  "keep recording for a real verdict.")
+        print(f"  >>> total episode N = {n_episodes} ({n_decided} decided)  "
+              f"(does bounce-rate / expectancy_r RISE with score AND beat baseline? "
+              f"does expR[touch] beat expR[none]?)")
+        if n_decided < 30:
+            print(f"  WARNING: small decided N (< 30 of {n_episodes} episodes) -- bucket rates "
+                  f"are NOISE; keep recording for a real verdict.")
+        if obs and min(o.horizon_snaps for o in obs) == 0:
+            thin = sum(1 for o in obs if o.horizon_snaps == 0)
+            print(f"  NOTE: {thin} episode(s) had ZERO forward snapshots (end-of-slice); "
+                  f"counted as undecided, not as losses.")
     else:
         print(__doc__)
 
