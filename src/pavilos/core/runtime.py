@@ -24,7 +24,9 @@ from pavilos.web.state import DashboardState
 _log = logging.getLogger(__name__)
 
 _SYMBOLS = {"kraken": "BTC/USD", "binance": "BTCUSDT", "coinbase": "BTC-USD",
-            "okx": "BTC-USDT", "bybit": "BTCUSDT", "bitstamp": "btcusd"}
+            "okx": "BTC-USDT", "bybit": "BTCUSDT", "bitstamp": "btcusd",
+            "gate": "BTC/USDT", "mexc": "BTC/USDT", "cryptocom": "BTC/USDT",
+            "bitget": "BTC/USDT", "kucoin": "BTC/USDT", "htx": "BTC/USDT"}
 
 
 def _wall_now() -> float:

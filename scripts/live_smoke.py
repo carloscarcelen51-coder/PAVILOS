@@ -17,7 +17,9 @@ from pavilos.core.engine import Engine
 async def main(seconds: float) -> int:
     from pavilos.connectors.venues import VENUE_SPECS, build_connector
     symbols = {"kraken": "BTC/USD", "binance": "BTCUSDT", "coinbase": "BTC-USD",
-               "okx": "BTC-USDT", "bybit": "BTCUSDT", "bitstamp": "btcusd"}
+               "okx": "BTC-USDT", "bybit": "BTCUSDT", "bitstamp": "btcusd",
+               "gate": "BTC/USDT", "mexc": "BTC/USDT", "cryptocom": "BTC/USDT",
+               "bitget": "BTC/USDT", "kucoin": "BTC/USDT", "htx": "BTC/USDT"}
     specs = list(VENUE_SPECS)
     agg = Aggregator(specs, PegProvider(), bin_bps=5.0, window_bps=50.0, staleness_s=15.0)
     connectors = [build_connector(v, symbols[v]) for v in symbols]

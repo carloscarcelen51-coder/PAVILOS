@@ -17,6 +17,7 @@ from pavilos.connectors.snapshot_delta_connector import SnapshotDeltaConnector
 from pavilos.connectors.coinbase import CoinbaseFeed
 from pavilos.connectors.okx import OKXFeed
 from pavilos.connectors.bybit import BybitFeed
+from pavilos.connectors.ccxt_connector import CcxtConnector
 
 VENUE_SPECS: tuple[VenueSpec, ...] = (
     VenueSpec("kraken", Quote.USD, Tier.A),
@@ -25,6 +26,12 @@ VENUE_SPECS: tuple[VenueSpec, ...] = (
     VenueSpec("okx", Quote.USDT, Tier.A),
     VenueSpec("bybit", Quote.USDT, Tier.A),
     VenueSpec("bitstamp", Quote.USD, Tier.A),
+    VenueSpec("gate", Quote.USDT, Tier.A),
+    VenueSpec("mexc", Quote.USDT, Tier.A),
+    VenueSpec("cryptocom", Quote.USDT, Tier.A),
+    VenueSpec("bitget", Quote.USDT, Tier.A),
+    VenueSpec("kucoin", Quote.USDT, Tier.A),
+    VenueSpec("htx", Quote.USDT, Tier.A),
 )
 
 
@@ -91,4 +98,6 @@ def build_connector(venue: str, symbol: str):
         return SnapshotDeltaConnector("okx", OKXFeed, connect=_okx_connect(symbol))
     if venue == "bybit":
         return SnapshotDeltaConnector("bybit", BybitFeed, connect=_bybit_connect(symbol))
+    if venue in ("gate", "mexc", "cryptocom", "bitget", "kucoin", "htx"):
+        return CcxtConnector(venue, symbol)
     raise KeyError(f"unknown venue {venue!r}")
