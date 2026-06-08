@@ -60,6 +60,13 @@ async def _forward_books(local_q, book_q, stop) -> None:
             u = await asyncio.wait_for(local_q.get(), timeout=0.5)
         except asyncio.TimeoutError:
             continue
+        # Offload the cross-process put to the default executor ON PURPOSE: even a
+        # non-blocking mp.Queue.put_nowait can micro-stall the loop on the feeder
+        # lock / pickling, and keeping the child's WS-keepalive loop unstalled is the
+        # whole reason M9 exists. (Parent side avoids this differently, via
+        # call_soon_threadsafe from a dedicated drain thread.) A dropped book update
+        # here is safe because every ccxt BookUpdate is a full snapshot
+        # (is_snapshot=True) — the next one fully replaces it, so we lose no delta.
         await loop.run_in_executor(None, _put_drop, book_q, u)
 
 
@@ -78,4 +85,7 @@ def _put_drop(q, item) -> None:
     try:
         q.put_nowait(item)
     except _queue.Full:
-        pass    # parent is behind; a newer snapshot supersedes this one
+        # Parent is behind; drop. Safe for both queues: health snaps are point-in-time
+        # (a newer one supersedes), and book updates are full ccxt snapshots (the next
+        # one fully replaces this one — see _forward_books — so no delta is lost).
+        pass
