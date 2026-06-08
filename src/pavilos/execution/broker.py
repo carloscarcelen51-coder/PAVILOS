@@ -85,6 +85,24 @@ class PaperBroker:
             raise ValueError("SHORT stop must be above trigger")
         self._pending = {"side": side, "trigger": trigger, "stop": stop, "size": size}
 
+    def enter_market(self, side: str, *, stop: float, size: float, ts: float) -> None:
+        """Open a position IMMEDIATELY at the current price (for mean-reversion entries
+        that fill at the support, not on a stop above it). Fills at ``_last_price``."""
+        if side not in ("LONG", "SHORT"):
+            raise ValueError(f"bad side {side!r}")
+        if self._position is not None or self._pending is not None:
+            raise RuntimeError("broker already has a position or pending entry")
+        if size <= 0:
+            raise ValueError("size must be positive")
+        price = self._last_price
+        if not (math.isfinite(stop) and math.isfinite(price) and price > 0):
+            raise ValueError("stop and current price must be finite/positive")
+        if side == "LONG" and not (stop < price):
+            raise ValueError("LONG stop must be below the entry price")
+        if side == "SHORT" and not (stop > price):
+            raise ValueError("SHORT stop must be above the entry price")
+        self._open(side, price, stop, size, ts)
+
     def cancel_entry(self) -> None:
         self._pending = None
 

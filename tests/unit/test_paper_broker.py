@@ -100,3 +100,31 @@ def test_place_entry_rejects_non_finite_levels():
     bk = _bk()
     with pytest.raises(ValueError):
         bk.place_entry("LONG", trigger=100.0, stop=float("nan"), size=1.0)
+
+
+def test_enter_market_opens_immediately_at_last_price():
+    from pavilos.execution.broker import PaperBroker
+    b = PaperBroker(starting_equity=10_000.0, taker_fee=0.0005)
+    b.on_price(100.0, ts=1.0)                       # establishes last price
+    b.enter_market("LONG", stop=98.0, size=2.0, ts=1.0)
+    pos = b.position()
+    assert pos is not None and pos.side == "LONG" and pos.entry == 100.0 and pos.stop == 98.0
+    # taker fee charged on entry notional
+    assert abs(b.equity(100.0) - (10_000.0 - 2.0 * 100.0 * 0.0005)) < 1e-9
+    # a LONG stop below the entry still fills via on_price
+    b.on_price(97.0, ts=2.0)
+    assert b.position() is None and b.trades()[-1].reason == "stop"
+
+
+def test_enter_market_validates_stop_side_and_state():
+    import pytest
+    from pavilos.execution.broker import PaperBroker
+    b = PaperBroker(starting_equity=10_000.0)
+    b.on_price(100.0, ts=1.0)
+    with pytest.raises(ValueError):                  # LONG stop must be below price
+        b.enter_market("LONG", stop=101.0, size=1.0, ts=1.0)
+    with pytest.raises(ValueError):
+        b.enter_market("SHORT", stop=99.0, size=1.0, ts=1.0)   # SHORT stop must be above
+    b.enter_market("LONG", stop=98.0, size=1.0, ts=1.0)
+    with pytest.raises(RuntimeError):                # already in a position
+        b.enter_market("LONG", stop=98.0, size=1.0, ts=1.0)
