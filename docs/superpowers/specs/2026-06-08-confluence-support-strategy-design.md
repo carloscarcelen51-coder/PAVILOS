@@ -37,11 +37,12 @@ A cluster is **tradeable/alertable** iff `score >= confluence_threshold` AND `n_
 - Initial **stop** beyond the cluster band, ATR-floored (`min(cluster_lo*(1-stop_offset), price - atr*atr_stop_mult)` for LONG; mirrored).
 - One position at a time (unchanged).
 
-## 5. Exit — ride up with a trailing stop (NOT a fixed TP)
-"Subir con ellos": let winners run.
-- **Chandelier trailing stop:** track `peak` = highest price since entry (LONG); trailing = `peak - atr * trail_mult`. Each tick, raise the broker stop to `max(current_stop, trailing)` (never lower). Exit when the broker stop is hit (the trail catches the reversal). Mirrored for SHORT (lowest price + atr*trail_mult).
-- **Structural exit (thesis broken):** if the confluence cluster we leaned on dissolves (no tradeable cluster overlaps the entry band anymore) → close. The floor we bet on is gone.
-- No fixed take-profit. Risk is bounded by the trailing stop; reward is open-ended (ride the move).
+## 5. Exit — ride up with a trailing stop (NOT a fixed TP) — TWO variants, compared
+"Subir con ellos": let winners run. We build **two trailing modes** (config `trail_mode`) and backtest them head-to-head (data decides which rides best), exactly as momentum-vs-reversion was compared:
+- **`trail_mode="chandelier"`** — `peak` = highest price since entry (LONG); trailing = `peak - atr * trail_mult`. Each tick raise the broker stop to `max(current_stop, trailing)` (never lower). Robust; trails even when no new structure forms. Mirrored SHORT (lowest price + atr*trail_mult).
+- **`trail_mode="support"`** — trail the stop up to just below the **highest confident support zone** that sits below price (`max(current_stop, highest_support.low*(1-stop_offset_bps))`). Rides the *structure* — each new support that forms during the rise becomes the new stop. If no new support forms, the stop does not advance (more give-back; a backstop ATR floor optional). Mirrored SHORT (lowest resistance above).
+- **Structural exit (both modes):** if the confluence cluster we leaned on dissolves (no tradeable cluster overlaps the entry band anymore) → close. The floor we bet on is gone.
+- No fixed take-profit. Risk is bounded by the trailing stop; reward is open-ended.
 
 ## 6. Paper trading + testing (NO alerts for now)
 The strategy makes **paper trades** on confluence setups via the existing `PaperBroker` — instead of alerting or trading live — precisely so it is **fully testable**:
@@ -72,7 +73,7 @@ No alerts/notifier module — paper trades + backtest are the only outputs.
 
 ## 10. Decisions (made with the user)
 1. **Confluence components:** include ALL THREE — (a) stacking, (b) venues, (c) historical-touches — built so each is **individually measurable** (ablatable), to learn which actually predicts. "Best for validating the theory, effort no object."
-2. **Trailing method:** **chandelier ATR** (`peak - atr*trail_mult`) — robust, standard, lets winners run, doesn't depend on new structure forming. (Used in the strategy milestone, not the validation step.)
+2. **Trailing method:** build BOTH — `trail_mode="chandelier"` (ATR) AND `trail_mode="support"` (trail below higher supports) — config-selectable, **backtested head-to-head** (data decides). (Strategy milestone, not the validation step.)
 3. **Sequencing:** **validation FIRST** (analyzer + study) before building the live paper entry/exit.
 4. **Alerts:** none — paper trades only.
 
@@ -84,8 +85,8 @@ No alerts/notifier module — paper trades + backtest are the only outputs.
 - **Verdict:** if high-confluence supports show a materially higher bounce-rate / forward return than baseline (with adequate samples), the theory holds → build the strategy (Milestone B). If not, the theory is refuted cheaply — before building any entry/exit.
 - Honest stats: report N per bucket; a high bounce-rate on tiny N is noise. This study has FAR more samples than trades (every cluster, not just traded ones), so it can actually reach significance.
 
-## 12. Milestone B (after validation): the paper strategy
-Only if Milestone A validates: confluence-gated reversion entry (§4) + chandelier trailing exit (§5) + structural exit → **paper trades** + the M6/M11 trade-level backtest (sanity + R-multiples). Built on the validated analyzer.
+## 12. Milestone B (after validation): the paper strategy — TWO trailing variants
+Only if Milestone A validates: confluence-gated reversion entry (§4) + structural exit, built with **both** trailing modes (§5) — `trail_mode="chandelier"` and `trail_mode="support"` — config-selectable. **Paper trades** + the M6/M11 trade-level backtest run BOTH variants head-to-head (sanity + R-multiples + the slowly-accumulating walk-forward OOS), so the data picks the better trailing. Built on the validated analyzer.
 
 (Alerts: resolved — none, paper trades only.)
 
