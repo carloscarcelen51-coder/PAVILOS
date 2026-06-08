@@ -70,24 +70,30 @@ def build_combined(
     ask_size: dict[int, float] = {}
     ask_comp: dict[int, dict[str, float]] = {}
 
-    def _accumulate(levels, quote, exchange, *, is_bid, size_map, comp_map):
+    lo, hi = mid - half_window, mid + half_window
+
+    def _accumulate(levels, rate, exchange, *, is_bid, size_map, comp_map):
+        # ``rate`` is the venue's quote->USD multiplier, resolved ONCE per venue:
+        # inlining ``usd = price * rate`` here avoids a peg.to_usd() call per level,
+        # and this loop runs over every level of every venue's book each snapshot
+        # (the per-snapshot hot path), so the call overhead dominated. The index
+        # expression is bin_index() inlined verbatim (identical float arithmetic).
         for price, size in levels:
-            usd = peg.to_usd(price, quote)
+            usd = price * rate
             if is_bid:
-                if not (mid - half_window <= usd < mid):
+                if not (lo <= usd < mid):
                     continue
-            else:
-                if not (mid < usd <= mid + half_window):
-                    continue
-            idx = bin_index(usd, mid, bin_bps)
+            elif not (mid < usd <= hi):
+                continue
+            idx = math.floor((usd - mid) / mid * 1e4 / bin_bps)
             size_map[idx] = size_map.get(idx, 0.0) + size
             comp = comp_map.setdefault(idx, {})
             comp[exchange] = comp.get(exchange, 0.0) + size
 
     for exchange, book, _ in contributors:
-        quote = specs[exchange].quote
-        _accumulate(book.bids().items(), quote, exchange, is_bid=True, size_map=bid_size, comp_map=bid_comp)
-        _accumulate(book.asks().items(), quote, exchange, is_bid=False, size_map=ask_size, comp_map=ask_comp)
+        rate = peg.to_usd(1.0, specs[exchange].quote)   # quote->USD rate once/venue (fail-loud for unset FX)
+        _accumulate(book.bids().items(), rate, exchange, is_bid=True, size_map=bid_size, comp_map=bid_comp)
+        _accumulate(book.asks().items(), rate, exchange, is_bid=False, size_map=ask_size, comp_map=ask_comp)
 
     bids = tuple(
         DepthBin(price=_bin_center_price(idx, mid, bin_bps), size=bid_size[idx], composition=bid_comp[idx])

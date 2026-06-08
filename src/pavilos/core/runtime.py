@@ -44,6 +44,9 @@ class RuntimeConfig:
                                 # ±50bps was too tight (flat book -> no walls stood out -> 0 zones -> 0 trades);
                                 # at ±300bps the top bin is ~36x the median and zones surface every snapshot.
     staleness_s: float = 15.0
+    snapshot_interval_s: float = 0.2   # 5Hz. Support/resistance zones persist seconds-to-minutes, so
+                                       # 10Hz was wasted CPU and a 2x-bigger synchronous build_combined
+                                       # block per tick (which was starving the ccxt WS keepalives).
     atr_window: int = 50
     host: str = "127.0.0.1"
     port: int = 8800
@@ -93,7 +96,7 @@ class Runtime:
         connectors = [connector_factory(v, config.symbols[v]) for v in config.symbols]
         agg = Aggregator(list(VENUE_SPECS), PegProvider(), bin_bps=config.bin_bps,
                          window_bps=config.window_bps, staleness_s=config.staleness_s)
-        engine = Engine(connectors, agg)
+        engine = Engine(connectors, agg, interval_s=config.snapshot_interval_s)
         detector = Detector(size_multiple=config.size_multiple, min_size=config.min_size,
                             max_gap_bps=config.max_gap_bps, max_zone_width_bps=config.max_zone_width_bps,
                             match_overlap_bps=config.match_overlap_bps, grace_s=config.grace_s,
