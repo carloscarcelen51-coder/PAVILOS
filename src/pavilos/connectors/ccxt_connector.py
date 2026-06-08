@@ -92,7 +92,9 @@ class CcxtConnector:
     def _default_make_exchange(self) -> object:
         import ccxt.pro  # imported lazily so unit tests never need ccxt
         import aiohttp
-        ex = getattr(ccxt.pro, self.exchange)({"enableRateLimit": True, **self._ccxt_options})
+        # generous timeout: under the full 12-venue + detection event-loop load, a tight
+        # default (10s) makes the later venues' load_markets/handshake time out.
+        ex = getattr(ccxt.pro, self.exchange)({"enableRateLimit": True, "timeout": 30000, **self._ccxt_options})
         # aiodns (aiohttp's default async resolver) is unreliable on this host
         # ("Could not contact DNS servers"); give ccxt an aiohttp session using the
         # stdlib ThreadedResolver so its REST (load_markets) + WS DNS both resolve.
