@@ -79,7 +79,8 @@ def _bybit_connect(symbol: str):
 def build_connector(venue: str, symbol: str):
     """Return a ready-to-run connector for ``venue`` (real transport wired)."""
     if venue == "kraken":
-        return KrakenConnector(symbol, depth=25)
+        return KrakenConnector(symbol, depth=1000)   # Kraken's max book depth — fills the ±300bps
+        # aggregate window (25 levels only covered the touch). CRC stays top-10; max_size=None handles frames.
     if venue == "binance":
         return BinanceConnector(symbol)
     if venue == "bitstamp":
