@@ -4,12 +4,16 @@
     python -m scripts.analyze <data_dir> window-sweep [t0 t1]
     python -m scripts.analyze <data_dir> walkforward [n_splits] [t0 t1]
     python -m scripts.analyze <data_dir> mode-compare [n_splits] [t0 t1]
+    python -m scripts.analyze <data_dir> confluence-study [horizon_s] [t0 t1]
 
 window-sweep: re-aggregate at 200/300/500/1000 bps -> detection profile + backtest.
 walkforward : re-aggregate at the configured window -> in-sample-optimise /
               out-of-sample-score the strategy params (OOS return is the verdict).
 mode-compare: walk-forward EACH entry mode (momentum vs reversion) on the same
               slice and print their OOS returns + #trades side by side.
+confluence-study: replay -> analyze_confluence -> ONE forward observation per
+              support-cluster episode; print bounce-rate + expectancy_r by
+              confluence-score bucket vs the baseline (the theory verdict).
 """
 from __future__ import annotations
 
@@ -21,6 +25,8 @@ from pavilos.core.runtime import RuntimeConfig
 from pavilos.backtest.replay import replay_snapshots
 from pavilos.backtest.analysis import window_sweep
 from pavilos.backtest.sweep import walk_forward
+from pavilos.detection.confluence import ConfluenceConfig
+from pavilos.backtest.confluence_study import StudyConfig, study_observations, summarize_study
 
 _WINDOWS = [200.0, 300.0, 500.0, 1000.0]
 _WF_GRID = {
@@ -60,6 +66,16 @@ def format_mode_row(mode: str, folds: list) -> str:
     tr = sum(f["oos_result"].n_trades for f in folds)
     is_ret = sum(f["is_result"].return_pct for f in folds) / len(folds)
     return f"  {mode:<10} mean IS={is_ret:+.2f}%  ->  mean OOS={oos:+.2f}%  over OOS trades={tr}"
+
+
+def format_study_row(row: dict) -> str:
+    """One readable per-bucket line: confluence-score range (the bucket label),
+    episode N, bounce%, expectancy in R, and mean forward return in bps."""
+    return (f"  {row['bucket']:<14} n={row['n']:<4} "
+            f"bounce={row['bounce_rate']*100:.0f}%  "
+            f"exp_R={row['expectancy_r']:+.2f}  "
+            f"mfe_R={row['mean_mfe_r']:+.2f} mae_R={row['mean_mae_r']:+.2f}  "
+            f"fwd={row['mean_fwd_return_bps']:+.1f}bps")
 
 
 def main() -> None:
@@ -111,6 +127,34 @@ def main() -> None:
             folds = walk_forward(snaps, base_config=cfg, grid=grid, n_splits=n_splits,
                                  starting_equity=base_cfg.starting_equity)
             print(format_mode_row(m, folds))
+    elif mode == "confluence-study":
+        horizon_s = float(sys.argv[3]) if len(sys.argv) > 3 else 60.0
+        a = float(sys.argv[4]) if len(sys.argv) > 4 else t0
+        b = float(sys.argv[5]) if len(sys.argv) > 5 else t1
+        snaps = replay_snapshots(base, a, b, window_bps=base_cfg.window_bps, bin_bps=base_cfg.bin_bps,
+                                 interval_s=base_cfg.snapshot_interval_s, staleness_s=base_cfg.staleness_s)
+        conf_cfg = ConfluenceConfig(confluence_band_bps=15.0, venues_target=base_cfg.venues_target,
+                                    threshold=0.5, min_venues=base_cfg.min_venues,
+                                    min_persistence_s=base_cfg.min_persistence_s)
+        study_cfg = StudyConfig(confluence=conf_cfg, horizon_s=horizon_s, target_r=base_cfg.tp_mult,
+                                stop_offset_bps=base_cfg.stop_offset_bps, atr_stop_mult=base_cfg.atr_stop_mult,
+                                entry_zone_bps=base_cfg.entry_zone_bps, episode_gap_s=base_cfg.grace_s)
+        obs = study_observations(snaps, study_cfg, runtime=base_cfg)
+        rows = summarize_study(obs, study_cfg.buckets, target_r=study_cfg.target_r)
+        n_episodes = len(obs)
+        print(f"=== confluence forward-return study, horizon={horizon_s:.0f}s, "
+              f"{len(snaps)} snapshots @ window={base_cfg.window_bps} ===")
+        print(f"    target_R={study_cfg.target_r}  entry_zone={study_cfg.entry_zone_bps:.0f}bps  "
+              f"episode_gap={study_cfg.episode_gap_s:.0f}s  -> {n_episodes} independent episodes")
+        for row in rows:
+            if row["bucket"] == "ALL":
+                print("  --- baseline ---")
+            print(format_study_row(row))
+        print(f"  >>> total episode N = {n_episodes}  "
+              f"(does bounce-rate / expectancy_r RISE with score AND beat baseline?)")
+        if n_episodes < 30:
+            print("  WARNING: small N (< 30 episodes) -- bucket rates are NOISE; "
+                  "keep recording for a real verdict.")
     else:
         print(__doc__)
 

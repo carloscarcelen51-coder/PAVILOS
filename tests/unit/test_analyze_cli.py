@@ -22,3 +22,25 @@ def test_format_mode_row_readable():
               "oos_result": BacktestResult(500, 6, 2, 4, 33.3, -15.0, 6.0, -0.15, 9985.0, 30.0, 0.3)}]
     s = format_mode_row("reversion", folds)
     assert "reversion" in s and "OOS" in s and "trades=" in s
+
+
+def test_format_study_row_readable():
+    from scripts.analyze import format_study_row
+    row = {"bucket": "[0.75,1.00)", "n": 42, "bounce_rate": 0.667,
+           "mean_fwd_return_bps": 12.5, "mean_mfe_r": 1.8, "mean_mae_r": -0.4,
+           "expectancy_r": 0.95}
+    s = format_study_row(row)
+    assert "[0.75,1.00)" in s
+    assert "n=42" in s
+    assert "67%" in s          # bounce_rate as a percentage
+    assert "+0.95" in s        # expectancy_r in R, signed
+    assert "+12.5" in s        # mean forward return in bps, signed
+
+
+def test_format_study_row_baseline_negative():
+    from scripts.analyze import format_study_row
+    row = {"bucket": "ALL", "n": 5, "bounce_rate": 0.2,
+           "mean_fwd_return_bps": -3.2, "mean_mfe_r": 0.5, "mean_mae_r": -1.1,
+           "expectancy_r": -0.4}
+    s = format_study_row(row)
+    assert "ALL" in s and "n=5" in s and "20%" in s and "-0.40" in s and "-3.2" in s
