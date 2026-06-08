@@ -10,6 +10,8 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "ccxt>=4.4",
     "protobuf>=5.29",   # required by ccxt.pro for MEXC's protobuf-encoded WS order book
+    "pyarrow>=16",      # Parquet writer for the raw-L2 data layer (M10)
+    "duckdb>=1.0",      # embedded SQL query over the Parquet lake (M10)
 ]
 
 [project.optional-dependencies]

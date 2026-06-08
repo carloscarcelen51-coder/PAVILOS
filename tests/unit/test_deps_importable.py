@@ -13,3 +13,8 @@ def test_web_deps_importable():
 def test_ccxt_importable():
     import ccxt, ccxt.pro  # noqa: F401
     assert ccxt.pro.gate().has.get("watchOrderBook") is True
+
+
+def test_parquet_duckdb_importable():
+    import pyarrow, pyarrow.parquet, duckdb  # noqa: F401
+    assert hasattr(pyarrow.parquet, "write_table")
