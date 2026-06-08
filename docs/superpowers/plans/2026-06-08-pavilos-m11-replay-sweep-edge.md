@@ -405,7 +405,7 @@ def _lake_span(base_dir: str):
 
 def format_sweep_row(row: dict) -> str:
     d = row["detection"]; b = row["backtest"]
-    return (f"win={row['window_bps']:>5.0f}  snaps={row['n_snapshots']:>6}  "
+    return (f"win={row['window_bps']:.0f}  snaps={row['n_snapshots']}  "
             f"zones/snap={d['avg_zones_per_snapshot']:.1f}  conf={d['avg_confidence']:.2f}  "
             f"venues/zone={d['avg_venues_per_zone']:.1f}  strong={d['frac_snaps_with_strong_zone']*100:.0f}%  "
             f"| trades={b.n_trades} ret={b.return_pct:+.2f}% win={b.win_rate:.0f}%")
