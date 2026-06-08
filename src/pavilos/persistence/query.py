@@ -18,6 +18,19 @@ def _has_files(base_dir: str) -> bool:
     return any(_glob_mod.iglob(os.path.join(base_dir, "**", "*.parquet"), recursive=True))
 
 
+def summary(base_dir: str) -> list[dict]:
+    """Per-exchange row count + ts range over the whole lake (empty list if no data).
+    ``n`` is the alias (NOT ``rows`` — that is a reserved keyword in DuckDB)."""
+    if not _has_files(base_dir):
+        return []
+    rel = duckdb.sql(
+        f"SELECT exchange, count(*) AS n, min(ts) AS t0, max(ts) AS t1 "
+        f"FROM '{_glob(base_dir)}' GROUP BY exchange ORDER BY n DESC"
+    )
+    cols = rel.columns
+    return [dict(zip(cols, r)) for r in rel.fetchall()]
+
+
 def load_range(base_dir: str, exchange: str, t0: float, t1: float) -> list[dict]:
     """All raw rows for ``exchange`` with ts in [t0, t1], ordered for replay."""
     if not _has_files(base_dir):

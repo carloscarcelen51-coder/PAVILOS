@@ -1,5 +1,16 @@
 from pavilos.persistence.parquet_sink import ParquetSink
-from pavilos.persistence.query import load_range, reconstruct_book
+from pavilos.persistence.query import load_range, reconstruct_book, summary
+
+
+def test_summary_counts_rows_per_exchange(tmp_path):
+    # exercises the summary SQL (would catch the reserved-keyword 'rows' alias bug)
+    _seed(str(tmp_path))
+    s = summary(str(tmp_path))
+    assert len(s) == 1 and s[0]["exchange"] == "kraken" and s[0]["n"] == 4
+
+
+def test_summary_empty_lake_returns_empty(tmp_path):
+    assert summary(str(tmp_path)) == []
 
 
 def _seed(base):
