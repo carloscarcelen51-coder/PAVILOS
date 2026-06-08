@@ -23,11 +23,13 @@ class Engine:
         *,
         interval_s: float = 0.1,
         now: Callable[[], float] | None = None,
+        on_update: Callable[[BookUpdate], None] | None = None,
     ) -> None:
         self._connectors = list(connectors)
         self._aggregator = aggregator
         self._interval_s = interval_s
         self._now = now or _wall_now
+        self._on_update = on_update
         self._updates: "asyncio.Queue[BookUpdate]" = asyncio.Queue()
         self.snapshots: "asyncio.Queue[CombinedDepthSnapshot]" = asyncio.Queue()
         self._stop = asyncio.Event()
@@ -38,8 +40,8 @@ class Engine:
         for c in self._connectors:
             self._tasks.append(asyncio.create_task(c.run(self._updates, self._stop)))
         self._tasks.append(asyncio.create_task(
-            self._aggregator.run(self._updates, self.snapshots,
-                                 interval_s=self._interval_s, now=self._now, stop=self._stop)
+            self._aggregator.run(self._updates, self.snapshots, interval_s=self._interval_s,
+                                 now=self._now, stop=self._stop, on_update=self._on_update)
         ))
 
     async def stop(self, *, grace: float = 2.0) -> None:

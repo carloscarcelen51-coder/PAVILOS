@@ -66,6 +66,7 @@ class Aggregator:
         interval_s: float,
         now: Callable[[], float],
         stop: "asyncio.Event",
+        on_update: Callable[[BookUpdate], None] | None = None,
     ) -> None:
         """Drain ``in_q`` into the books and emit a snapshot every ``interval_s``.
 
@@ -84,9 +85,12 @@ class Aggregator:
             # Drain everything currently queued without blocking.
             while True:
                 try:
-                    self.apply(in_q.get_nowait())
+                    u = in_q.get_nowait()
                 except asyncio.QueueEmpty:
                     break
+                self.apply(u)
+                if on_update is not None:
+                    on_update(u)
             snap = self.snapshot(now())
             if snap is not None:
                 await out_q.put(snap)

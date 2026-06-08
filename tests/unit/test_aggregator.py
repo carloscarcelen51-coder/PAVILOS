@@ -74,3 +74,29 @@ def test_run_emits_snapshot_then_stops():
     snap = asyncio.run(scenario())
     assert snap is not None
     assert set(snap.venues_active) == {"kraken", "coinbase"}
+
+
+def test_run_calls_on_update_for_each_update():
+    import asyncio
+    from pavilos.aggregator.aggregator import Aggregator
+    from pavilos.aggregator.normalize import PegProvider
+    from pavilos.core.models import BookUpdate, VenueSpec, Quote, Tier
+
+    seen = []
+    agg = Aggregator([VenueSpec("kraken", Quote.USD, Tier.A)], PegProvider(),
+                     bin_bps=5.0, window_bps=300.0, staleness_s=15.0)
+
+    async def scenario():
+        in_q: asyncio.Queue = asyncio.Queue()
+        out_q: asyncio.Queue = asyncio.Queue()
+        stop = asyncio.Event()
+        await in_q.put(BookUpdate(exchange="kraken", ts=1.0, bids=((100.0, 1.0),),
+                                  asks=((101.0, 1.0),), is_snapshot=True, seq=1))
+        task = asyncio.create_task(agg.run(in_q, out_q, interval_s=0.01, now=lambda: 1.0,
+                                           stop=stop, on_update=seen.append))
+        await asyncio.sleep(0.05)
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    asyncio.run(scenario())
+    assert len(seen) == 1 and seen[0].exchange == "kraken"
