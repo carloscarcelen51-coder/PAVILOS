@@ -9,15 +9,34 @@ from pavilos.persistence.recorder import BookRecorder
 class _FakeSink:
     def __init__(self):
         self.rows_by_ex: dict[str, list] = {}
+        self.write_calls = 0
         self._lock = threading.Lock()
     def write(self, exchange, rows):
         with self._lock:
             self.rows_by_ex.setdefault(exchange, []).extend(rows)
+            self.write_calls += 1
         return 1
 
 
 def _u(ex, ts, bids, asks, snap=True, seq=1):
     return BookUpdate(exchange=ex, ts=ts, bids=tuple(bids), asks=tuple(asks), is_snapshot=snap, seq=seq)
+
+
+def test_batches_per_interval_not_per_update_under_steady_arrival():
+    # 10 updates trickling over ~1 flush window must collapse into a few writes,
+    # NOT ~10 (one per drain) -- the time-boxed collect is what keeps file count sane.
+    sink = _FakeSink()
+    rec = BookRecorder(sink, flush_interval_s=0.25)
+    rec.start()
+    try:
+        for i in range(10):
+            rec.record(_u("kraken", float(i), [(1.0, 1.0)], []))
+            time.sleep(0.02)
+        time.sleep(0.4)
+    finally:
+        rec.stop()
+    assert len(sink.rows_by_ex["kraken"]) == 10   # nothing lost
+    assert sink.write_calls <= 4                  # batched per window, not one-per-update
 
 
 def test_record_expands_levels_and_flushes_via_writer_thread():

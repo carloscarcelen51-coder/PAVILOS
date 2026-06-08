@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 
 from pavilos.core.models import BookUpdate
 
@@ -52,21 +53,43 @@ class BookRecorder:
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            batch = self._drain(self._flush_interval_s)
+            batch = self._collect(self._flush_interval_s)
             if batch:
                 self._flush(batch)
-        rest = self._drain(0.0)                  # final flush on shutdown
+        rest = self._drain_nowait()              # final flush on shutdown
         if rest:
             self._flush(rest)
 
-    def _drain(self, wait_s: float) -> list[BookUpdate]:
+    def _collect(self, window_s: float) -> list[BookUpdate]:
+        """Accumulate every update that arrives within ``window_s`` into ONE batch,
+        then return it. This writes ~one file per exchange per interval instead of
+        one per drain (which, under continuous streaming, produced thousands of tiny
+        files). Blocking gets are capped at 0.5s so stop() is honoured within ~0.5s
+        regardless of ``window_s``; the stop sentinel ends the window immediately."""
         out: list[BookUpdate] = []
-        try:
-            first = self._q.get(timeout=wait_s) if wait_s > 0 else self._q.get_nowait()
-        except queue.Empty:
-            return out
-        if first is not _SENTINEL:
-            out.append(first)
+        end = time.monotonic() + window_s
+        while not self._stop.is_set():
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                item = self._q.get(timeout=min(remaining, 0.5))
+            except queue.Empty:
+                continue
+            if item is _SENTINEL:
+                break
+            out.append(item)
+            while True:                          # absorb whatever else is already queued
+                try:
+                    more = self._q.get_nowait()
+                except queue.Empty:
+                    break
+                if more is not _SENTINEL:
+                    out.append(more)
+        return out
+
+    def _drain_nowait(self) -> list[BookUpdate]:
+        out: list[BookUpdate] = []
         while True:
             try:
                 item = self._q.get_nowait()
