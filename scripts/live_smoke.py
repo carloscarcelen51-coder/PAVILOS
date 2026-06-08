@@ -1,5 +1,5 @@
 # scripts/live_smoke.py
-"""MANUAL live smoke (uses the network): run all six Tier-A venues through the
+"""MANUAL live smoke (uses the network): run all 12 Tier-A venues through the
 Engine for a few seconds and print the combined book + health. Not a pytest test.
 
 Usage: python -m scripts.live_smoke [seconds]

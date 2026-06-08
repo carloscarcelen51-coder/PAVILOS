@@ -1,5 +1,5 @@
 # src/pavilos/connectors/venues.py
-"""Venue registry: the six Tier-A venues + a factory that builds a ready
+"""Venue registry: the 12 Tier-A venues + a factory that builds a ready
 connector (real transport wired) for each. The real WS subscribes + app-level
 pings here are live-smoke-only; unit tests check wiring, not connectivity."""
 from __future__ import annotations

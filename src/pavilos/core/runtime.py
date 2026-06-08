@@ -1,5 +1,5 @@
 # src/pavilos/core/runtime.py
-"""Assemble the live PAVILOS object graph and run it: Engine (6 venues) ->
+"""Assemble the live PAVILOS object graph and run it: Engine (12 venues) ->
 Detector -> SignalEngine -> PaperBroker, publishing each tick to a DashboardState,
 served by a FastAPI/uvicorn dashboard. Bounded shutdown; supervised trading loop."""
 from __future__ import annotations

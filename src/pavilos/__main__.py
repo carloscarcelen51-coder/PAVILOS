@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from pavilos.connectors.venues import VENUE_SPECS
 from pavilos.core.runtime import Runtime, RuntimeConfig
 
 
@@ -13,7 +14,7 @@ def main() -> None:
     cfg = RuntimeConfig()
     rt = Runtime.build(cfg)
     _log = logging.getLogger("pavilos")
-    _log.info("PAVILOS paper dashboard on http://%s:%d (PAPER mode, 6 venues)", cfg.host, cfg.port)
+    _log.info("PAVILOS paper dashboard on http://%s:%d (PAPER mode, %d venues)", cfg.host, cfg.port, len(VENUE_SPECS))
     try:
         asyncio.run(rt.run_app())
     except KeyboardInterrupt:
