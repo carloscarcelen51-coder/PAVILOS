@@ -59,6 +59,58 @@ def test_preserves_full_precision_unlike_float():
     assert exact != collapsed   # float would mangle the digits -> different checksum
 
 
+def _ref_checksum(bids: dict, asks: dict) -> int:
+    # Reference = the pre-optimization logic: exact Decimal full-sort, top 10.
+    a = sorted(asks.items(), key=lambda kv: Decimal(kv[0]))[:10]
+    b = sorted(bids.items(), key=lambda kv: Decimal(kv[0]), reverse=True)[:10]
+    return book_checksum([(p, q) for p, q in a], [(p, q) for p, q in b])
+
+
+def test_checksum_equiv_to_decimal_reference_over_random_deep_book():
+    # Prove the heapq/float-ordered + early-return-bound optimization yields the SAME
+    # CRC as the original full-Decimal-sort implementation, over a deep (depth=1000)
+    # book driven by many random deltas (adds, replaces, removals, growth past depth).
+    import random
+    rng = random.Random(20260608)
+    book = KrakenRawBook("BTC/USD", depth=1000)
+    bids: dict[str, str] = {}
+    asks: dict[str, str] = {}
+
+    def fmt(x: float) -> str:
+        return f"{x:.2f}"
+
+    base = 63000.0
+    snap_b = [(fmt(base - i * 0.25), "1.50000000") for i in range(1000)]
+    snap_a = [(fmt(base + 0.25 + i * 0.25), "1.50000000") for i in range(1000)]
+    book.apply(_snap(snap_b, snap_a))
+    for p, q in snap_b:
+        bids[p] = q
+    for p, q in snap_a:
+        asks[p] = q
+    assert book.checksum() == _ref_checksum(bids, asks)
+
+    for _ in range(300):
+        ub, ua = [], []
+        for _ in range(rng.randint(1, 8)):
+            # touch a price near the top of book (where the checksum lives) or deeper
+            b_price = fmt(base - rng.randint(0, 1200) * 0.25)
+            a_price = fmt(base + 0.25 + rng.randint(0, 1200) * 0.25)
+            b_qty = "0" if rng.random() < 0.3 else f"{rng.uniform(0.1, 9):.8f}"
+            a_qty = "0" if rng.random() < 0.3 else f"{rng.uniform(0.1, 9):.8f}"
+            ub.append((b_price, b_qty))
+            ua.append((a_price, a_qty))
+        book.apply(_upd(ub, ua))
+        # mirror into the reference dicts (last write wins; qty 0 removes)
+        for p, q in ub:
+            bids.pop(p, None) if Decimal(q) == 0 else bids.__setitem__(p, q)
+        for p, q in ua:
+            asks.pop(p, None) if Decimal(q) == 0 else asks.__setitem__(p, q)
+        # the reference is bounded to top-`depth` the same way before comparing top-10
+        bids = dict(sorted(bids.items(), key=lambda kv: Decimal(kv[0]), reverse=True)[:1000])
+        asks = dict(sorted(asks.items(), key=lambda kv: Decimal(kv[0]))[:1000])
+        assert book.checksum() == _ref_checksum(bids, asks)
+
+
 def test_accepts_decimal_values_from_real_decode():
     # Real frames decode with parse_float=Decimal, so price/qty arrive as Decimal.
     book = KrakenRawBook("BTC/USD", depth=10)

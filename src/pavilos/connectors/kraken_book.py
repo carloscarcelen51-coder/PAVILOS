@@ -6,6 +6,7 @@ but loses the precision the checksum needs). Price strings are dict keys, valid
 because Kraken sends each price at a fixed precision per pair."""
 from __future__ import annotations
 
+import heapq
 from decimal import Decimal
 
 from pavilos.connectors.kraken import book_checksum
@@ -45,8 +46,18 @@ class KrakenRawBook:
             self._set(self._bids, lvl)
         for lvl in data["asks"]:
             self._set(self._asks, lvl)
-        self._bids = dict(sorted(self._bids.items(), key=lambda kv: Decimal(kv[0]), reverse=True)[: self._depth])
-        self._asks = dict(sorted(self._asks.items(), key=lambda kv: Decimal(kv[0]))[: self._depth])
+        # Bound each side to the top `depth` by price -- but only when it has actually
+        # grown past depth. In the steady state the book sits at ~depth, so this is a
+        # cheap length check, NOT a full Decimal re-sort on every update (that sort was
+        # the event-loop hog at depth=1000, ~0.5ms/update, starving the ccxt WS feeds).
+        self._bids = self._bound(self._bids, reverse=True)
+        self._asks = self._bound(self._asks, reverse=False)
+
+    def _bound(self, side: dict[str, str], *, reverse: bool) -> dict[str, str]:
+        if len(side) <= self._depth:
+            return side                       # already within depth -> no work (common case)
+        pick = heapq.nlargest if reverse else heapq.nsmallest   # bids keep highest, asks lowest
+        return dict(pick(self._depth, side.items(), key=lambda kv: Decimal(kv[0])))
 
     @staticmethod
     def _set(side: dict[str, str], lvl: dict) -> None:
@@ -59,8 +70,11 @@ class KrakenRawBook:
 
     def checksum(self) -> int:
         # Kraken's CRC is ALWAYS over the top 10 levels, regardless of subscribed depth.
-        asks = sorted(self._asks.items(), key=lambda kv: Decimal(kv[0]))[:10]
-        bids = sorted(self._bids.items(), key=lambda kv: Decimal(kv[0]), reverse=True)[:10]
+        # Select them with heapq (no full sort of all `depth` levels). float orders/picks
+        # the 10 -- exact for Kraken's distinct fixed-precision prices -- while the CRC is
+        # computed over the exact wire STRINGS, so its value is identical to a Decimal sort.
+        asks = heapq.nsmallest(10, self._asks.items(), key=lambda kv: float(kv[0]))
+        bids = heapq.nlargest(10, self._bids.items(), key=lambda kv: float(kv[0]))
         return book_checksum([(p, q) for p, q in asks], [(p, q) for p, q in bids])
 
     def verify(self, expected: int) -> bool:
