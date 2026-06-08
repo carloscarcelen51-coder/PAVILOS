@@ -77,6 +77,8 @@ class RuntimeConfig:
     max_leverage: float = 10.0
     entry_zone_bps: float = 30.0       # only trade a support/resistance when price is within this of it
     pending_timeout_s: float = 10.0    # cancel a pending entry that has not filled in this long
+    entry_mode: str = "momentum"       # "momentum" (default, breakout) | "reversion" (bounce at support)
+    tp_mult: float = 2.0               # reversion take-profit at tp_mult x risk distance
     # raw-L2 data layer. Recording is ON, writing ONLY inside this new D: folder
     # (never touches other files on D:). 7-day retention keeps the disk bounded.
     book_data_dir: str | None = r"D:\pavilos_book_data"
@@ -122,7 +124,8 @@ class Runtime:
                               stop_offset_bps=config.stop_offset_bps, atr_stop_mult=config.atr_stop_mult,
                               opposing_distance_bps=config.opposing_distance_bps, risk_pct=config.risk_pct,
                               max_leverage=config.max_leverage, entry_zone_bps=config.entry_zone_bps,
-                              pending_timeout_s=config.pending_timeout_s)
+                              pending_timeout_s=config.pending_timeout_s,
+                              entry_mode=config.entry_mode, tp_mult=config.tp_mult)
         trade_log = TradeLog(config.trade_log_path)
         all_trades = trade_log.load()
 

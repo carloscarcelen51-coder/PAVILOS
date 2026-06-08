@@ -42,7 +42,8 @@ def _signal(c: RuntimeConfig) -> SignalEngine:
                         stop_offset_bps=c.stop_offset_bps, atr_stop_mult=c.atr_stop_mult,
                         opposing_distance_bps=c.opposing_distance_bps, risk_pct=c.risk_pct,
                         max_leverage=c.max_leverage, entry_zone_bps=c.entry_zone_bps,
-                        pending_timeout_s=c.pending_timeout_s)
+                        pending_timeout_s=c.pending_timeout_s,
+                        entry_mode=c.entry_mode, tp_mult=c.tp_mult)
 
 
 def run_backtest(snapshots, *, config: RuntimeConfig, starting_equity: float) -> BacktestResult:

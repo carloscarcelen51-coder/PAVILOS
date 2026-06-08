@@ -13,3 +13,12 @@ def test_format_sweep_row_readable():
 
 def test_lake_span_missing_dir_returns_none(tmp_path):
     assert _lake_span(str(tmp_path / "nope")) is None
+
+
+def test_format_mode_row_readable():
+    from scripts.analyze import format_mode_row
+    from pavilos.backtest.runner import BacktestResult
+    folds = [{"is_result": BacktestResult(500, 8, 5, 3, 62.5, 40.0, 8.0, 0.40, 10040.0, 20.0, 0.2),
+              "oos_result": BacktestResult(500, 6, 2, 4, 33.3, -15.0, 6.0, -0.15, 9985.0, 30.0, 0.3)}]
+    s = format_mode_row("reversion", folds)
+    assert "reversion" in s and "OOS" in s and "trades=" in s

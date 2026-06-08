@@ -3,10 +3,13 @@
 
     python -m scripts.analyze <data_dir> window-sweep [t0 t1]
     python -m scripts.analyze <data_dir> walkforward [n_splits] [t0 t1]
+    python -m scripts.analyze <data_dir> mode-compare [n_splits] [t0 t1]
 
 window-sweep: re-aggregate at 200/300/500/1000 bps -> detection profile + backtest.
 walkforward : re-aggregate at the configured window -> in-sample-optimise /
               out-of-sample-score the strategy params (OOS return is the verdict).
+mode-compare: walk-forward EACH entry mode (momentum vs reversion) on the same
+              slice and print their OOS returns + #trades side by side.
 """
 from __future__ import annotations
 
@@ -26,6 +29,10 @@ _WF_GRID = {
     "entry_zone_bps": [15.0, 30.0, 60.0],
     "atr_stop_mult": [2.0, 3.0, 5.0],
 }
+_MOM_GRID = {"entry_threshold": [0.4, 0.55, 0.7], "opposing_distance_bps": [5.0, 10.0, 20.0],
+             "entry_zone_bps": [15.0, 30.0, 60.0], "atr_stop_mult": [2.0, 3.0, 5.0]}
+_REV_GRID = {"entry_threshold": [0.4, 0.55, 0.7], "entry_zone_bps": [15.0, 30.0, 60.0],
+             "atr_stop_mult": [2.0, 3.0, 5.0], "tp_mult": [1.5, 2.0, 3.0]}
 
 
 def _lake_span(base_dir: str):
@@ -44,6 +51,15 @@ def format_sweep_row(row: dict) -> str:
             f"zones/snap={d['avg_zones_per_snapshot']:.1f}  conf={d['avg_confidence']:.2f}  "
             f"venues/zone={d['avg_venues_per_zone']:.1f}  strong={d['frac_snaps_with_strong_zone']*100:.0f}%  "
             f"| trades={b.n_trades} ret={b.return_pct:+.2f}% win={b.win_rate:.0f}%")
+
+
+def format_mode_row(mode: str, folds: list) -> str:
+    if not folds:
+        return f"  {mode:<10} (no folds)"
+    oos = sum(f["oos_result"].return_pct for f in folds) / len(folds)
+    tr = sum(f["oos_result"].n_trades for f in folds)
+    is_ret = sum(f["is_result"].return_pct for f in folds) / len(folds)
+    return f"  {mode:<10} mean IS={is_ret:+.2f}%  ->  mean OOS={oos:+.2f}%  over OOS trades={tr}"
 
 
 def main() -> None:
@@ -82,6 +98,19 @@ def main() -> None:
             avg = sum(f["oos_result"].return_pct for f in folds) / len(folds)
             tot = sum(f["oos_result"].n_trades for f in folds)
             print(f"  >>> mean OOS return = {avg:+.2f}%  over {tot} OOS trades  (the verdict)")
+    elif mode == "mode-compare":
+        n_splits = int(sys.argv[3]) if len(sys.argv) > 3 else 4
+        a = float(sys.argv[4]) if len(sys.argv) > 4 else t0
+        b = float(sys.argv[5]) if len(sys.argv) > 5 else t1
+        snaps = replay_snapshots(base, a, b, window_bps=base_cfg.window_bps, bin_bps=base_cfg.bin_bps,
+                                 interval_s=base_cfg.snapshot_interval_s, staleness_s=base_cfg.staleness_s)
+        print(f"=== mode compare, {n_splits} folds, {len(snaps)} snapshots ===")
+        import dataclasses as _dc
+        for m, grid in (("momentum", _MOM_GRID), ("reversion", _REV_GRID)):
+            cfg = _dc.replace(base_cfg, entry_mode=m)
+            folds = walk_forward(snaps, base_config=cfg, grid=grid, n_splits=n_splits,
+                                 starting_equity=base_cfg.starting_equity)
+            print(format_mode_row(m, folds))
     else:
         print(__doc__)
 
