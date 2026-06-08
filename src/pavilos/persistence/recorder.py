@@ -15,6 +15,8 @@ from pavilos.core.models import BookUpdate
 
 _log = logging.getLogger(__name__)
 
+_SENTINEL = object()    # poison-pill to wake the writer's blocking get() on stop()
+
 
 class BookRecorder:
     def __init__(self, sink, *, flush_interval_s: float = 5.0, max_queue: int = 200_000) -> None:
@@ -33,11 +35,18 @@ class BookRecorder:
             self.dropped += 1                   # writer behind -> drop (never block ingest)
 
     def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return                               # idempotent: no duplicate writer thread
+        self._stop.clear()                       # allow a clean restart after stop()
         self._thread = threading.Thread(target=self._run, name="book-recorder", daemon=True)
         self._thread.start()
 
     def stop(self, *, timeout: float = 10.0) -> None:
         self._stop.set()
+        try:
+            self._q.put_nowait(_SENTINEL)        # wake a blocking get() immediately
+        except queue.Full:
+            pass                                 # writer is busy draining; it'll see _stop
         if self._thread is not None:
             self._thread.join(timeout)
 
@@ -53,14 +62,18 @@ class BookRecorder:
     def _drain(self, wait_s: float) -> list[BookUpdate]:
         out: list[BookUpdate] = []
         try:
-            out.append(self._q.get(timeout=wait_s) if wait_s > 0 else self._q.get_nowait())
+            first = self._q.get(timeout=wait_s) if wait_s > 0 else self._q.get_nowait()
         except queue.Empty:
             return out
+        if first is not _SENTINEL:
+            out.append(first)
         while True:
             try:
-                out.append(self._q.get_nowait())
+                item = self._q.get_nowait()
             except queue.Empty:
                 break
+            if item is not _SENTINEL:
+                out.append(item)
         return out
 
     def _flush(self, updates: list[BookUpdate]) -> None:

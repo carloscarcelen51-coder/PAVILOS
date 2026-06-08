@@ -51,3 +51,24 @@ def test_record_is_nonblocking_and_drops_when_queue_full():
     assert rec.dropped >= 1     # overflow dropped, never blocked
     # stop flushes whatever made it into the queue without hanging
     rec.start(); rec.stop()
+
+
+def test_start_is_idempotent_no_duplicate_writer_thread():
+    sink = _FakeSink()
+    rec = BookRecorder(sink, flush_interval_s=0.02)
+    rec.start()
+    try:
+        first = rec._thread
+        rec.start()                       # second start must NOT spawn a duplicate
+        assert rec._thread is first
+    finally:
+        rec.stop()
+
+
+def test_stop_on_idle_recorder_does_not_block_for_flush_interval():
+    sink = _FakeSink()
+    rec = BookRecorder(sink, flush_interval_s=100.0)   # huge interval; idle queue
+    rec.start()
+    t0 = time.time()
+    rec.stop(timeout=5.0)
+    assert time.time() - t0 < 2.0     # stop must wake the writer promptly

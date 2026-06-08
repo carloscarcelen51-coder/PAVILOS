@@ -1,7 +1,9 @@
 # src/pavilos/persistence/parquet_sink.py
 """Write batches of L2 rows to Hive-partitioned Parquet (exchange/date/hour),
 zstd-compressed. One file per write() per (date, hour) partition; file names are
-unique per partition so concurrent/repeated writes never clobber."""
+globally unique (pid + monotonic ns + per-partition counter) so concurrent or
+repeated writes — including a fresh sink after a process restart writing into an
+existing partition — never clobber a prior file."""
 from __future__ import annotations
 
 import os
@@ -42,7 +44,9 @@ class ParquetSink:
             key = (exchange, date, hour)
             idx = self._counter.get(key, 0)
             self._counter[key] = idx + 1
-            path = os.path.join(part, f"{idx:06d}.parquet")
+            # globally unique: collision-proof across fresh sinks (process restart)
+            # and concurrent writers, not just within one in-memory counter.
+            path = os.path.join(part, f"{os.getpid()}-{time.time_ns()}-{idx:06d}.parquet")
             table = pa.Table.from_pylist(grp, schema=_SCHEMA)
             pq.write_table(table, path, compression=self._compression)
             written += 1

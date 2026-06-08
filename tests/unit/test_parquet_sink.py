@@ -30,3 +30,15 @@ def test_two_writes_same_partition_do_not_overwrite(tmp_path):
     sink.write("okx", [{**r[0], "seq_no": 1, "price": 2.0}])
     n = duckdb.sql(f"SELECT count(*) FROM '{tmp_path}/**/*.parquet'").fetchone()[0]
     assert n == 2   # second write must not clobber the first
+
+
+def test_fresh_sink_does_not_overwrite_prior_partition_file(tmp_path):
+    # A process restart constructs a NEW ParquetSink (counter resets to {}).
+    # Writing into an existing (exchange,date,hour) partition must NOT clobber
+    # the prior run's file.
+    r = [{"seq_no": 0, "ts": 1_700_000_000.0, "exchange": "okx", "is_snapshot": True, "side": "bid", "price": 100.0, "size": 1.0}]
+    ParquetSink(str(tmp_path)).write("okx", r)               # run 1
+    ParquetSink(str(tmp_path)).write("okx", [{**r[0], "price": 200.0}])  # run 2 (fresh sink)
+    prices = {row[0] for row in duckdb.sql(
+        f"SELECT price FROM '{tmp_path}/**/*.parquet'").fetchall()}
+    assert prices == {100.0, 200.0}   # both runs' rows survive
