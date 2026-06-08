@@ -70,10 +70,22 @@ No alerts/notifier module — paper trades + backtest are the only outputs.
 - **Phase 1 (core):** ConfluenceAnalyzer (stacking + venues, no history) → confluence-gated reversion entry → chandelier trailing exit + structural exit → **paper trades** + backtest/sweep. Delivers the full testable strategy minus history.
 - **Phase 2:** historical-touches confluence component (uses the lake). (Alerts/Telegram remain out of scope unless reintroduced later.)
 
-## 10. Open decisions (need the user's call before the plan)
-1. **Confluence components in Phase 1:** stacking + venues only (defer historical), or include historical-touches from the start (heavier)?
-2. **Trailing method:** chandelier (ATR-based, `peak - atr*trail_mult`) — recommended — vs trail-below-higher-supports (structure-based).
-3. **Scope/sequencing:** build the whole Phase 1 (confluence + entry + trailing exit + paper) as one milestone, or land the **ConfluenceAnalyzer + a backtest first** (measure on recorded data whether confluence setups even look promising) BEFORE wiring the live paper entry/exit?
+## 10. Decisions (made with the user)
+1. **Confluence components:** include ALL THREE — (a) stacking, (b) venues, (c) historical-touches — built so each is **individually measurable** (ablatable), to learn which actually predicts. "Best for validating the theory, effort no object."
+2. **Trailing method:** **chandelier ATR** (`peak - atr*trail_mult`) — robust, standard, lets winners run, doesn't depend on new structure forming. (Used in the strategy milestone, not the validation step.)
+3. **Sequencing:** **validation FIRST** (analyzer + study) before building the live paper entry/exit.
+4. **Alerts:** none — paper trades only.
+
+## 11. Milestone A (FIRST): Confluence forward-return validation study
+**The key reframe for validating the theory with MANY samples, not few trades.** To test "do multi-venue confluence supports predict bounces?" we do NOT need to trade — we measure, over the recorded lake, what price did AFTER every confluence cluster formed:
+- **ConfluenceAnalyzer** (a+b+c) over the M11-replayed snapshot stream → confluence clusters with scores + component sub-scores.
+- For each support cluster near price, record a **forward-return observation**: the price move over the next `H` seconds (and the max-favorable-excursion / max-adverse-excursion = did it bounce, and how far before it broke). This is a *measurement of the future* (legitimate for signal validation — we are measuring predictive power, NOT trading on look-ahead).
+- **Aggregate by confluence-score bucket** (and by each component a/b/c, and vs a low-confluence/baseline control): bounce-rate, mean forward return, MFE/MAE distribution, sample size.
+- **Verdict:** if high-confluence supports show a materially higher bounce-rate / forward return than baseline (with adequate samples), the theory holds → build the strategy (Milestone B). If not, the theory is refuted cheaply — before building any entry/exit.
+- Honest stats: report N per bucket; a high bounce-rate on tiny N is noise. This study has FAR more samples than trades (every cluster, not just traded ones), so it can actually reach significance.
+
+## 12. Milestone B (after validation): the paper strategy
+Only if Milestone A validates: confluence-gated reversion entry (§4) + chandelier trailing exit (§5) + structural exit → **paper trades** + the M6/M11 trade-level backtest (sanity + R-multiples). Built on the validated analyzer.
 
 (Alerts: resolved — none, paper trades only.)
 
