@@ -15,7 +15,6 @@ import sys
 import duckdb
 
 from pavilos.core.runtime import RuntimeConfig
-from pavilos.backtest.runner import BacktestResult
 from pavilos.backtest.replay import replay_snapshots
 from pavilos.backtest.analysis import window_sweep
 from pavilos.backtest.sweep import walk_forward

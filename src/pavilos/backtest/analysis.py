@@ -8,17 +8,9 @@ import dataclasses
 from statistics import mean
 
 from pavilos.core.runtime import RuntimeConfig
-from pavilos.detection.detector import Detector
 from pavilos.signals.atr import ATR
-from pavilos.backtest.runner import run_backtest
+from pavilos.backtest.runner import run_backtest, _detector
 from pavilos.backtest.replay import replay_snapshots
-
-
-def _detector(c: RuntimeConfig) -> Detector:
-    return Detector(size_multiple=c.size_multiple, min_size=c.min_size, max_gap_bps=c.max_gap_bps,
-                    max_zone_width_bps=c.max_zone_width_bps, match_overlap_bps=c.match_overlap_bps,
-                    grace_s=c.grace_s, window_bps=c.det_window_bps, persistence_target_s=c.persistence_target_s,
-                    venues_target=c.venues_target, strength_target=c.strength_target)
 
 
 def detection_profile(snapshots, config: RuntimeConfig) -> dict:

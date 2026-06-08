@@ -5,9 +5,13 @@ through the REAL Aggregator, so it is faithful to live by construction.
 Lake rows for one BookUpdate share (ts, exchange, seq_no). We stream them in
 (ts, exchange, seq_no) order, group into BookUpdates, apply them to a real
 Aggregator, and emit a snapshot at each cadence boundary (every interval_s of
-recorded time, after applying all updates with ts <= boundary) -- exactly like
-Aggregator.run. Cadence snapshots are invariant to intra-tick venue ordering, so
-this reproduces the live snapshot stream."""
+recorded time, after applying all updates with ts <= boundary). For a given book
+state this reconstructs the snapshot Aggregator.run would produce; because cadence
+snapshots are invariant to intra-tick venue ordering, the per-boundary book content
+matches live. Boundary timing is RECORDED-time (not wall-clock) by design for
+deterministic backtests, and the trailing quiet tail is NOT padded -- exactly one
+final boundary is emitted after the last update (live would re-emit unchanged
+snapshots each interval during a quiet tail; duplicates carry no new info here)."""
 from __future__ import annotations
 
 import duckdb
