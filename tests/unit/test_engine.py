@@ -44,6 +44,30 @@ def test_engine_produces_combined_snapshot_from_connectors():
     assert snap.mid == 100.5
 
 
+def test_health_collects_plural_healths_from_pool_like_connectors():
+    from pavilos.core.engine import Engine
+    from pavilos.aggregator.aggregator import Aggregator
+    from pavilos.aggregator.normalize import PegProvider
+    from pavilos.connectors.base import ConnectorHealth
+
+    class _Single:
+        exchange = "kraken"
+        def health(self): return ConnectorHealth("kraken", True, 1.0, 0, 0)
+        async def run(self, q, s): ...
+
+    class _Pool:
+        exchange = "ccxt-pool"
+        def healths(self): return [ConnectorHealth("gate", True, 2.0, 0, 0),
+                                   ConnectorHealth("mexc", False, 0.0, 0, 3)]
+        async def run(self, q, s): ...
+
+    agg = Aggregator([], PegProvider(), bin_bps=5.0, window_bps=300.0, staleness_s=15.0)
+    eng = Engine([_Single(), _Pool()], agg)
+    names = {h.exchange for h in eng.health()}
+    assert names == {"kraken", "gate", "mexc"}
+    assert any(h.exchange == "mexc" and h.errors == 3 for h in eng.health())
+
+
 def test_engine_stop_cancels_a_wedged_connector():
     # A connector that never observes stop must NOT hang Engine.stop().
     from pavilos.core.models import VenueSpec, Quote, Tier

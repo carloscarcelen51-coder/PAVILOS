@@ -56,7 +56,13 @@ class Engine:
         self._tasks.clear()
 
     def health(self) -> list[ConnectorHealth]:
-        return [c.health() for c in self._connectors if hasattr(c, "health")]
+        out: list[ConnectorHealth] = []
+        for c in self._connectors:
+            if hasattr(c, "healths"):       # a pool connector reports many venues
+                out.extend(c.healths())
+            elif hasattr(c, "health"):
+                out.append(c.health())
+        return out
 
 
 def _wall_now() -> float:
