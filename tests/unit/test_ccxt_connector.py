@@ -19,6 +19,28 @@ class _FakeExchange:
         self.closed = True
 
 
+def test_levels_with_extra_fields_are_truncated_to_price_amount():
+    # cryptocom/bitget/kucoin return [price, amount, <extra>] per level; the
+    # connector must take only the first two, not crash on "too many to unpack".
+    books = [{"bids": [[100.0, 1.0, 7], [99.5, 2.0, 3]],
+              "asks": [[101.0, 2.0, "ignored"]], "nonce": 5}]
+
+    async def scenario():
+        out_q: asyncio.Queue = asyncio.Queue()
+        stop = asyncio.Event()
+        conn = CcxtConnector("bitget", "BTC/USDT", make_exchange=lambda: _FakeExchange(books),
+                             now=lambda: 1.0, sleep=lambda d: asyncio.sleep(0), max_backoff=0.0)
+        task = asyncio.create_task(conn.run(out_q, stop))
+        u = await asyncio.wait_for(out_q.get(), timeout=1.0)
+        stop.set(); task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return u
+
+    u = asyncio.run(scenario())
+    assert u.bids == ((100.0, 1.0), (99.5, 2.0)) and u.asks == ((101.0, 2.0),)
+    assert u.seq == 5
+
+
 def test_emits_snapshots_from_ccxt_books():
     books = [{"bids": [[100.0, 1.0]], "asks": [[101.0, 2.0]], "nonce": 1},
              {"bids": [[100.0, 1.5]], "asks": [[101.0, 2.0]], "nonce": 2}]

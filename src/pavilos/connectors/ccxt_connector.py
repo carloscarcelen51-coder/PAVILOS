@@ -63,8 +63,12 @@ class CcxtConnector:
                         break
                     out = BookUpdate(
                         exchange=self.exchange, ts=self._now(),
-                        bids=tuple((float(p), float(a)) for p, a in ob.get("bids", [])),
-                        asks=tuple((float(p), float(a)) for p, a in ob.get("asks", [])),
+                        # take [price, amount] from each level by INDEX: some venues
+                        # (cryptocom/bitget/kucoin) return extra trailing fields per
+                        # level (e.g. order count), so `for p, a in level` would raise
+                        # "too many values to unpack" and the venue would never connect.
+                        bids=tuple((float(lvl[0]), float(lvl[1])) for lvl in ob.get("bids", [])),
+                        asks=tuple((float(lvl[0]), float(lvl[1])) for lvl in ob.get("asks", [])),
                         is_snapshot=True, seq=ob.get("nonce"))
                     await out_q.put(out)
                     self._last_update_ts = out.ts
