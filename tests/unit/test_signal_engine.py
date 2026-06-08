@@ -161,3 +161,11 @@ def test_no_same_tick_reentry_after_stop_out():
     lower = _zone(Side.SUPPORT, price=95.5, low=95.3, high=95.7)
     e.update(_analysis(3.0, mid=96.0, supports=[lower]), atr=1.0, broker=bk)  # stop-out; must NOT re-arm same tick
     assert e.state == "IDLE" and bk.position() is None and bk.pending_entry() is None
+
+
+def test_garbage_atr_does_not_arm_unreachable_stop():
+    e, bk = _engine(), _bk()
+    sup = _zone(Side.SUPPORT, price=99.0, low=98.8, high=99.2)
+    # atr so large that price - atr*atr_stop_mult <= 0 -> pathological stop -> must NOT arm
+    e.update(_analysis(1.0, mid=100.0, supports=[sup]), atr=1000.0, broker=bk)
+    assert e.state == "IDLE" and bk.pending_entry() is None

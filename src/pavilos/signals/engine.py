@@ -98,6 +98,11 @@ class SignalEngine:
             # never tighter than the ATR floor
             trigger = price * (1 - self.entry_offset_bps / 1e4)
             stop = max(best.high * (1 + self.stop_offset_bps / 1e4), price + atr * self.atr_stop_mult)
+        # skip a pathological stop (e.g. garbage ATR pushing it <=0 / to the wrong
+        # side) rather than arm an order with an unreachable protective stop
+        ok = (0.0 < stop < trigger) if best_dir == "LONG" else (stop > trigger > 0.0)
+        if not ok:
+            return
         size = position_size(broker.equity(), entry=trigger, stop=stop,
                              risk_pct=self.risk_pct, max_leverage=self.max_leverage)
         if size <= 0:
