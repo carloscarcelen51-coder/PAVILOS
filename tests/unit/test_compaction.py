@@ -189,6 +189,25 @@ def test_dry_run_count_excludes_stray_temp(tmp_path):
     assert c == {"partitions": 1, "files": 3}   # 3 real files, stray temp NOT counted
 
 
+def test_rows_equal_ignores_order_and_catches_drops(tmp_path):
+    """The DuckDB EXCEPT-ALL verify is order-independent (a reordered copy is
+    equal) and exact (a single dropped/extra row is caught) — and streams from
+    disk, so it does not materialise rows in Python (the MemoryError fix)."""
+    import pyarrow as pa
+    from pavilos.persistence.compaction import _rows_equal
+    rows = [{"seq_no": i, "ts": 1.0 + i, "exchange": "k", "is_snapshot": True,
+             "side": "bid", "price": 100.0 + i, "size": 1.0 + (i % 5)} for i in range(20)]
+    a = os.path.join(tmp_path, "a.parquet")
+    b = os.path.join(tmp_path, "b.parquet")
+    c = os.path.join(tmp_path, "c.parquet")
+    pq.write_table(pa.Table.from_pylist(rows), a)
+    pq.write_table(pa.Table.from_pylist(list(reversed(rows))), b)   # same multiset, different order
+    pq.write_table(pa.Table.from_pylist(rows[:-1]), c)              # one row dropped
+    assert _rows_equal(b, [a]) is True       # order does NOT matter
+    assert _rows_equal(c, [a]) is False      # a dropped row IS caught
+    assert _rows_equal(a, [a, c]) is False   # extra rows (a vs a+c) caught
+
+
 def test_compact_partition_recovers_sole_orphan_temp(tmp_path):
     """Crash AFTER deleting the originals but BEFORE the final rename leaves ONLY
     the verified temp as the sole full copy. The next run MUST promote it, never

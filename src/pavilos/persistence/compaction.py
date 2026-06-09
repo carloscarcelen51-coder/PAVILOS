@@ -9,6 +9,7 @@ import logging
 import os
 import time
 
+import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -24,16 +25,32 @@ def _read_file(path: str) -> pa.Table:
     return pq.ParquetFile(path).read()
 
 
+def _sql_files(paths: list[str]) -> str:
+    """A DuckDB ``read_parquet(...)`` over an explicit file list with Hive
+    inference OFF — the ``exchange=/date=`` path would otherwise inject partition
+    columns that collide with the in-file ``exchange`` column."""
+    lst = ", ".join("'" + p.replace("\\", "/").replace("'", "''") + "'" for p in paths)
+    return f"read_parquet([{lst}], hive_partitioning=false)"
+
+
 def _rows_equal(merged_path: str, orig_paths: list[str]) -> bool:
     """True iff the merged file's rows are the SAME MULTISET as the originals
-    (order-independent; queries re-ORDER BY). Reads the merged file back from disk
-    so a write/zstd bug is caught."""
-    m = _read_file(merged_path)
-    o = pa.concat_tables([_read_file(p) for p in orig_paths])
-    if m.num_rows != o.num_rows:
-        return False
-    return sorted(map(tuple, (r.values() for r in m.to_pylist()))) == \
-           sorted(map(tuple, (r.values() for r in o.to_pylist())))
+    (order-independent; queries re-ORDER BY). Uses DuckDB ``EXCEPT ALL`` both ways
+    (multiset difference), which STREAMS from disk — so it verifies
+    multi-million-row partitions without materialising every row in Python. The
+    old ``to_pylist`` approach exhausted memory and crashed (MemoryError, then a
+    segfault) on large partitions. Reads the merged file back from disk so a
+    write/zstd bug is still caught."""
+    con = duckdb.connect()
+    try:
+        m, o = _sql_files([merged_path]), _sql_files(orig_paths)
+        diff = con.sql(
+            f"SELECT (SELECT count(*) FROM (SELECT * FROM {o} EXCEPT ALL SELECT * FROM {m})) "
+            f"+ (SELECT count(*) FROM (SELECT * FROM {m} EXCEPT ALL SELECT * FROM {o}))"
+        ).fetchone()[0]
+        return diff == 0
+    finally:
+        con.close()
 
 
 _TEMP_PREFIX = "_compacted"
