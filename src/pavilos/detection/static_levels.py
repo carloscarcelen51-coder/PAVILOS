@@ -116,9 +116,13 @@ class StaticLevelTracker:
         mid = snapshot.mid
 
         if mid > 0.0:
-            # Use the SAME wall definition as the Detector (detect_walls: size >=
-            # size_multiple x the side's median), per side, so a "static level" is
-            # built from exactly the walls the rest of the system sees.
+            # Use the SAME size_multiple wall definition as the Detector
+            # (detect_walls: size >= size_multiple x the side's median), per side.
+            # NOTE: we pass min_size=0.0 (no absolute floor) — the Detector applies
+            # its own RuntimeConfig.min_size, so the tracker can accrue smaller bins
+            # the Detector would reject. That is intentional for level ACCRUAL
+            # (StaticLevelConfig has no min_size knob); the breadth/strength/away
+            # gates downstream do the discriminating, not an absolute size floor.
             walls = (detect_walls(snapshot.bids, size_multiple=cfg.size_multiple, min_size=0.0)
                      + detect_walls(snapshot.asks, size_multiple=cfg.size_multiple, min_size=0.0))
             for w in walls:
@@ -167,6 +171,10 @@ class StaticLevelTracker:
         )
 
     def _active(self, mid: float, now: float, *, below: bool) -> list[StaticLevel]:
+        # ``now`` is accepted for caller symmetry/intent only; pruning is causal
+        # at ``update`` time, so a query reports state as of the last update and
+        # does NOT re-prune at ``now`` (a stale level is dropped on the next
+        # update that advances past its stale_s, not on a later read).
         cfg = self.cfg
         if mid <= 0.0:
             return []

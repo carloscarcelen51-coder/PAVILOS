@@ -46,6 +46,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from statistics import mean
 
+from pavilos.backtest.forward import bucket_label, expectancy, measure_forward
 from pavilos.detection.static_levels import (
     StaticLevel,
     StaticLevelConfig,
@@ -147,44 +148,6 @@ def _best_near_support(supports: list[StaticLevel], mid: float,
     return best
 
 
-def _measure_forward(snapshots, i: int, entry: float, risk: float,
-                     cfg: StaticStudyConfig) -> tuple[float, float, float, bool, bool, int]:
-    """Scan snapshots strictly AFTER onset index ``i`` within ``horizon_s`` and
-    return (mfe_r, mae_r, fwd_return_bps, bounced, decided, horizon_snaps).
-    Mirrors M13's R-math: ``decided`` is True iff +target_r or -1R was resolved
-    before the horizon expired; a window reaching neither (incl. an empty forward
-    window) is ``decided=False, bounced=False`` and must NOT be scored as a
-    stop-out. Forward-only: never touches snapshots at or before ``i``."""
-    entry_ts = snapshots[i].ts
-    mfe = 0.0   # best favourable excursion (mid - entry), >= 0
-    mae = 0.0   # worst adverse excursion (mid - entry), <= 0
-    last_mid = entry
-    bounced = False
-    decided = False
-    n = 0
-    for j in range(i + 1, len(snapshots)):
-        s = snapshots[j]
-        if s.ts - entry_ts > cfg.horizon_s:
-            break
-        n += 1
-        delta = s.mid - entry
-        if delta > mfe:
-            mfe = delta
-        if delta < mae:
-            mae = delta
-        last_mid = s.mid
-        # Decide bounce in TIME order: whichever threshold is reached FIRST wins.
-        if not decided and risk > 0.0:
-            if delta >= cfg.target_r * risk:
-                bounced, decided = True, True
-            elif delta <= -risk:
-                bounced, decided = False, True
-    mfe_r = mfe / risk if risk > 0.0 else 0.0
-    mae_r = mae / risk if risk > 0.0 else 0.0
-    fwd_return_bps = ((last_mid - entry) / entry * 1e4) if entry else 0.0
-    return mfe_r, mae_r, fwd_return_bps, bounced, decided, n
-
-
 def study_static_approaches(snapshots, cfg: StaticStudyConfig) -> list[Obs]:
     """Replay ``snapshots`` through a causal ``StaticLevelTracker``, sampling ONE
     forward observation per price-approach episode to an active static support.
@@ -242,7 +205,8 @@ def study_static_approaches(snapshots, cfg: StaticStudyConfig) -> list[Obs]:
             # do not re-sample the same persisting approach, but record no obs.
             open_level, last_in_zone_ts = cand.price, snap.ts
             continue
-        mfe_r, mae_r, fwd_bps, bounced, decided, n = _measure_forward(snaps, i, entry, risk, cfg)
+        mfe_r, mae_r, fwd_bps, bounced, decided, n = measure_forward(
+            snaps, i, entry=entry, risk=risk, horizon_s=cfg.horizon_s, target_r=cfg.target_r)
         outcome_r = (cfg.target_r if bounced else -1.0) if decided else None
         out.append(Obs(
             ts=snap.ts, level_price=cand.price, level_strength=cand.strength,
@@ -253,19 +217,6 @@ def study_static_approaches(snapshots, cfg: StaticStudyConfig) -> list[Obs]:
         open_level, last_in_zone_ts = cand.price, snap.ts
 
     return out
-
-
-def _bucket_label(lo: float, hi: float) -> str:
-    return f"[{lo:.2f},{hi:.2f})"
-
-
-def _expectancy(members: list[Obs]) -> float:
-    """Mean per-obs R outcome over DECIDED observations only (the honest,
-    scale-free verdict). ``outcome_r`` was decided at sample time so it can never
-    desync from ``bounced``. Undecided/horizon-clipped obs are excluded — never
-    charged as a -1R stop-out. No decided obs -> finite zero (not a loss)."""
-    decided = [o.outcome_r for o in members if o.outcome_r is not None]
-    return mean(decided) if decided else 0.0
 
 
 def _summary_row(bucket: str, members: list[Obs]) -> dict:
@@ -291,7 +242,7 @@ def _summary_row(bucket: str, members: list[Obs]) -> dict:
         "mean_fwd_return_bps": mean(o.fwd_return_bps for o in members),
         "mean_mfe_r": mean(o.mfe_r for o in members),
         "mean_mae_r": mean(o.mae_r for o in members),
-        "expectancy_r": _expectancy(members),
+        "expectancy_r": expectancy(members),
     }
 
 
@@ -318,6 +269,6 @@ def summarize_static(observations, buckets: tuple[float, ...] = (0.0, 0.25, 0.5,
                 if o.level_strength >= lo and (o.level_strength <= hi if top
                                                else o.level_strength < hi)
             ]
-            rows.append(_summary_row(_bucket_label(lo, hi), members))
+            rows.append(_summary_row(bucket_label(lo, hi), members))
     rows.append(_summary_row("ALL", obs))
     return rows

@@ -61,6 +61,7 @@ from pavilos.detection.confluence import ConfluenceCluster, ConfluenceConfig, an
 from pavilos.detection.level_history import LevelHistory
 from pavilos.detection.models import Side
 from pavilos.signals.atr import ATR
+from pavilos.backtest.forward import bucket_label, expectancy, measure_forward
 from pavilos.backtest.runner import _detector
 
 
@@ -143,44 +144,6 @@ def _bands_overlap(a: ConfluenceCluster, b: ConfluenceCluster, tol: float = 0.0)
     return a.price_lo - tol <= b.price_hi and a.price_hi + tol >= b.price_lo
 
 
-def _measure_forward(snapshots, i: int, entry: float, risk: float,
-                     cfg: StudyConfig) -> tuple[float, float, float, bool, bool, int]:
-    """Scan snapshots strictly AFTER onset index ``i`` within ``horizon_s`` and
-    return (mfe_r, mae_r, fwd_return_bps, bounced, decided, horizon_snaps).
-    ``decided`` is True iff +target_r or -1R was resolved before the horizon
-    expired; a window that reaches neither (incl. an empty forward window) is
-    ``decided=False, bounced=False`` and must NOT be scored as a stop-out.
-    Forward-only: never touches snapshots at or before ``i`` (the onset)."""
-    entry_ts = snapshots[i].ts
-    mfe = 0.0   # best favourable excursion (mid - entry), >= 0
-    mae = 0.0   # worst adverse excursion (mid - entry), <= 0
-    last_mid = entry
-    bounced = False
-    decided = False
-    n = 0
-    for j in range(i + 1, len(snapshots)):
-        s = snapshots[j]
-        if s.ts - entry_ts > cfg.horizon_s:
-            break
-        n += 1
-        delta = s.mid - entry
-        if delta > mfe:
-            mfe = delta
-        if delta < mae:
-            mae = delta
-        last_mid = s.mid
-        # Decide bounce in TIME order: whichever threshold is reached FIRST wins.
-        if not decided and risk > 0.0:
-            if delta >= cfg.target_r * risk:
-                bounced, decided = True, True
-            elif delta <= -risk:
-                bounced, decided = False, True
-    mfe_r = mfe / risk if risk > 0.0 else 0.0
-    mae_r = mae / risk if risk > 0.0 else 0.0
-    fwd_return_bps = ((last_mid - entry) / entry * 1e4) if entry else 0.0
-    return mfe_r, mae_r, fwd_return_bps, bounced, decided, n
-
-
 def study_observations(snapshots, cfg: StudyConfig, *,
                        runtime: RuntimeConfig | None = None) -> list[Obs]:
     """Replay ``snapshots`` through a ``Detector`` + ``analyze_confluence``,
@@ -245,7 +208,8 @@ def study_observations(snapshots, cfg: StudyConfig, *,
             # do not re-sample the same persisting cluster, but record no obs.
             open_cluster, last_seen_ts = cand, snap.ts
             continue
-        mfe_r, mae_r, fwd_bps, bounced, decided, n = _measure_forward(snaps, i, entry, risk, cfg)
+        mfe_r, mae_r, fwd_bps, bounced, decided, n = measure_forward(
+            snaps, i, entry=entry, risk=risk, horizon_s=cfg.horizon_s, target_r=cfg.target_r)
         # Outcome R decided at sample time: it can never desync from `bounced`.
         outcome_r = (cfg.target_r if bounced else -1.0) if decided else None
         out.append(Obs(
@@ -256,19 +220,6 @@ def study_observations(snapshots, cfg: StudyConfig, *,
         open_cluster, last_seen_ts = cand, snap.ts
 
     return out
-
-
-def _bucket_label(lo: float, hi: float) -> str:
-    return f"[{lo:.2f},{hi:.2f})"
-
-
-def _expectancy(members: list[Obs]) -> float:
-    """Mean per-obs R outcome over DECIDED observations only (the honest,
-    scale-free verdict). ``outcome_r`` was decided at sample time so it can never
-    desync from ``bounced``. Undecided/horizon-clipped obs are excluded — never
-    charged as a -1R stop-out. No decided obs -> finite zero (not a loss)."""
-    decided = [o.outcome_r for o in members if o.outcome_r is not None]
-    return mean(decided) if decided else 0.0
 
 
 def _summary_row(bucket: str, members: list[Obs], target_r: float) -> dict:
@@ -300,9 +251,9 @@ def _summary_row(bucket: str, members: list[Obs], target_r: float) -> dict:
         "mean_fwd_return_bps": mean(o.fwd_return_bps for o in members),
         "mean_mfe_r": mean(o.mfe_r for o in members),
         "mean_mae_r": mean(o.mae_r for o in members),
-        "expectancy_r": _expectancy(members),
-        "expectancy_r_with_touches": _expectancy([o for o in members if o.n_touches > 0]),
-        "expectancy_r_no_touches": _expectancy([o for o in members if o.n_touches == 0]),
+        "expectancy_r": expectancy(members),
+        "expectancy_r_with_touches": expectancy([o for o in members if o.n_touches > 0]),
+        "expectancy_r_no_touches": expectancy([o for o in members if o.n_touches == 0]),
     }
 
 
@@ -335,6 +286,6 @@ def summarize_study(observations, buckets: tuple[float, ...] = (0.0, 0.25, 0.5, 
                 if o.confluence_score >= lo and (o.confluence_score <= hi if top
                                                  else o.confluence_score < hi)
             ]
-            rows.append(_summary_row(_bucket_label(lo, hi), members, target_r))
+            rows.append(_summary_row(bucket_label(lo, hi), members, target_r))
     rows.append(_summary_row("ALL", obs, target_r))
     return rows
