@@ -44,3 +44,28 @@ def test_format_study_row_baseline_negative():
            "expectancy_r": -0.4}
     s = format_study_row(row)
     assert "ALL" in s and "n=5" in s and "20%" in s and "-0.40" in s and "-3.2" in s
+
+
+def test_format_static_row_readable():
+    from scripts.analyze import format_static_row
+    # schema produced by pavilos.backtest.static_study.summarize_static
+    row = {"bucket": "[0.75,1.00)", "n": 18, "n_decided": 15, "n_undecided": 3,
+           "bounce_rate": 0.6, "mean_fwd_return_bps": 9.4, "mean_mfe_r": 1.5,
+           "mean_mae_r": -0.5, "expectancy_r": 0.85}
+    s = format_static_row(row)
+    assert "[0.75,1.00)" in s
+    assert "n=18" in s
+    assert "und=3" in s        # undecided count surfaced (excluded from exp_R)
+    assert "60%" in s          # bounce_rate as a percentage
+    assert "+0.85" in s        # expectancy_r in R, signed
+    assert "+9.4" in s         # mean forward return in bps, signed
+
+
+def test_format_static_row_baseline_negative_no_undecided():
+    from scripts.analyze import format_static_row
+    row = {"bucket": "ALL", "n": 6, "n_decided": 6, "n_undecided": 0,
+           "bounce_rate": 0.166, "mean_fwd_return_bps": -2.7, "mean_mfe_r": 0.4,
+           "mean_mae_r": -1.0, "expectancy_r": -0.5}
+    s = format_static_row(row)
+    assert "ALL" in s and "n=6" in s and "17%" in s and "-0.50" in s and "-2.7" in s
+    assert "und=" not in s     # no undecided -> no (und=N) clutter
