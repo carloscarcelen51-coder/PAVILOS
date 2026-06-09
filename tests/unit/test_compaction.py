@@ -187,3 +187,44 @@ def test_dry_run_count_excludes_stray_temp(tmp_path):
     now = _hour_ts("2026-06-01", "12")          # hour 08 is closed
     c = count_compactable(base, now_ts=now)
     assert c == {"partitions": 1, "files": 3}   # 3 real files, stray temp NOT counted
+
+
+def test_compact_partition_recovers_sole_orphan_temp(tmp_path):
+    """Crash AFTER deleting the originals but BEFORE the final rename leaves ONLY
+    the verified temp as the sole full copy. The next run MUST promote it, never
+    delete it (deleting would lose the entire partition — the M15 final-review
+    blocker)."""
+    base = str(tmp_path)
+    _seed_partition(base, "kraken", "2026-06-01", "05", n_files=4, rows_per=6)
+    part = _part_dir(base, "kraken", "2026-06-01", "05")
+    real = sorted(p for p in os.listdir(part) if p.endswith(".parquet"))
+    real_rows = _rowset([os.path.join(part, f) for f in real])
+    import pyarrow as pa
+    tbl = pa.concat_tables([pq.ParquetFile(os.path.join(part, f)).read() for f in real])
+    pq.write_table(tbl, os.path.join(part, "_compacted_555555.parquet"), compression="zstd")
+    for f in real:
+        os.remove(os.path.join(part, f))            # originals deleted (the crash window)
+    res = compact_partition(part)
+    after = [p for p in os.listdir(part) if p.endswith(".parquet")]
+    assert after == ["compacted.parquet"]            # temp PROMOTED, not lost
+    assert res.get("recovered") is True
+    assert _rowset([os.path.join(part, "compacted.parquet")]) == real_rows   # data intact
+
+
+def test_compact_partition_recovers_crash_after_replace(tmp_path):
+    """Crash AFTER the merged file landed as compacted.parquet but BEFORE deleting
+    the now-absorbed raw originals. The next run MUST delete the leftover raw and
+    keep compacted.parquet — never re-merge them (that would DOUBLE the data)."""
+    base = str(tmp_path)
+    _seed_partition(base, "okx", "2026-06-01", "04", n_files=4, rows_per=6)
+    part = _part_dir(base, "okx", "2026-06-01", "04")
+    real = sorted(p for p in os.listdir(part) if p.endswith(".parquet"))
+    real_rows = _rowset([os.path.join(part, f) for f in real])
+    import pyarrow as pa
+    tbl = pa.concat_tables([pq.ParquetFile(os.path.join(part, f)).read() for f in real])
+    pq.write_table(tbl, os.path.join(part, "compacted.parquet"), compression="zstd")  # already landed
+    res = compact_partition(part)
+    after = [p for p in os.listdir(part) if p.endswith(".parquet")]
+    assert after == ["compacted.parquet"]            # leftover raw cleaned up
+    assert res.get("recovered") is True
+    assert _rowset([os.path.join(part, "compacted.parquet")]) == real_rows   # NOT doubled
