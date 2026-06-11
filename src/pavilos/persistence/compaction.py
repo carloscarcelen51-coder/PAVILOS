@@ -7,22 +7,28 @@ from __future__ import annotations
 import calendar
 import logging
 import os
+import tempfile
 import time
 
 import duckdb
-import pyarrow as pa
-import pyarrow.parquet as pq
 
 _log = logging.getLogger(__name__)
 
+#: Hard cap on DuckDB RAM. Compacting/verifying a multi-million-row deep-book
+#: partition would otherwise build large hash tables / buffers and spike to many
+#: GB (a prior run OOM'd and segfaulted). With this cap DuckDB SPILLS to disk
+#: instead, keeping memory bounded regardless of partition size.
+_DUCKDB_MEM_LIMIT = "3GB"
+_SPILL_DIR = os.path.join(tempfile.gettempdir(), "pavilos_duckdb_spill")
 
-def _read_file(path: str) -> pa.Table:
-    """Read ONE parquet file as its own stored schema, ignoring any Hive
-    partition columns inherited from the ``exchange=.../date=.../HH`` path.
-    ``pq.read_table`` would auto-infer the Hive partitioning and inject an
-    ``exchange`` dictionary column that collides with the ``exchange`` string
-    column stored inside the file; ``ParquetFile.read`` reads only the file."""
-    return pq.ParquetFile(path).read()
+
+def _connect():
+    """A memory-capped DuckDB connection (spills to disk past the cap)."""
+    os.makedirs(_SPILL_DIR, exist_ok=True)
+    con = duckdb.connect()
+    con.sql(f"SET memory_limit='{_DUCKDB_MEM_LIMIT}'")
+    con.sql(f"SET temp_directory='{_SPILL_DIR.replace(chr(92), '/')}'")
+    return con
 
 
 def _sql_files(paths: list[str]) -> str:
@@ -41,7 +47,7 @@ def _rows_equal(merged_path: str, orig_paths: list[str]) -> bool:
     old ``to_pylist`` approach exhausted memory and crashed (MemoryError, then a
     segfault) on large partitions. Reads the merged file back from disk so a
     write/zstd bug is still caught."""
-    con = duckdb.connect()
+    con = _connect()
     try:
         m, o = _sql_files([merged_path]), _sql_files(orig_paths)
         diff = con.sql(
@@ -117,9 +123,18 @@ def compact_partition(part_dir: str) -> dict:
         return {"skipped": True, "files": len(raw)}
 
     paths = [os.path.join(part_dir, f) for f in raw]
-    merged = pa.concat_tables([_read_file(p) for p in paths])
     tmp = os.path.join(part_dir, f"{_TEMP_PREFIX}_{os.getpid()}.parquet")
-    pq.write_table(merged, tmp, compression="zstd")
+    # STREAM the merge through DuckDB (read the file list -> write ONE zstd file) so
+    # memory stays bounded even on multi-million-row deep-book partitions. An arrow
+    # concat_tables here materialised every row and spiked to ~14 GB on busy venue
+    # hours; the DuckDB COPY streams read->write at a few hundred MB.
+    tmp_sql = "'" + tmp.replace("\\", "/").replace("'", "''") + "'"
+    con = _connect()
+    try:
+        con.sql(f"COPY (SELECT * FROM {_sql_files(paths)}) TO {tmp_sql} (FORMAT parquet, COMPRESSION zstd)")
+        nrows = con.sql(f"SELECT count(*) FROM {_sql_files([tmp])}").fetchone()[0]
+    finally:
+        con.close()
     try:
         if not _rows_equal(tmp, paths):
             raise ValueError(f"compaction verify FAILED for {part_dir}; keeping originals")
@@ -133,7 +148,7 @@ def compact_partition(part_dir: str) -> dict:
     os.replace(tmp, final_path)
     for p in paths:
         os.remove(p)
-    return {"compacted": True, "files_before": len(raw), "rows": merged.num_rows}
+    return {"compacted": True, "files_before": len(raw), "rows": nrows}
 
 
 def _partition_hour_epoch(date: str, hour: str) -> float:
