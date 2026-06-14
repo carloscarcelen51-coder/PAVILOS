@@ -21,7 +21,11 @@ def test_logs_callback_exception_and_does_not_raise(caplog):
 def test_ignores_cancellation_and_handles_missing_exception(caplog):
     loop = asyncio.new_event_loop()
     try:
-        _loop_exception_handler(loop, {"exception": asyncio.CancelledError()})   # benign
-        _loop_exception_handler(loop, {"message": "no exception object here"})    # must not raise
+        with caplog.at_level(logging.ERROR):
+            _loop_exception_handler(loop, {"exception": asyncio.CancelledError()})   # benign
+            # benign cancellation/shutdown must be SILENT (regression guard: a handler
+            # that starts logging on CancelledError would fail here)
+            assert not caplog.records
+            _loop_exception_handler(loop, {"message": "no exception object here"})    # must not raise
     finally:
         loop.close()

@@ -31,7 +31,7 @@ def test_backoff_escalates_on_tight_crashloop_then_caps():
     supervise(["x"], _run=fake_run, _sleep=lambda s: slept.append(s), _now=now,
               should_continue=lambda: calls["n"] < 5, backoff_s=1.0, max_backoff_s=8.0)
     # backoff doubles on consecutive instant crashes, capped at max
-    assert slept and slept[0] == 1.0 and max(slept) <= 8.0 and slept == sorted(slept)[:len(slept)]
+    assert slept and slept[0] == 1.0 and max(slept) <= 8.0 and slept == sorted(slept)
 
 
 def test_backoff_resets_after_a_healthy_run():
