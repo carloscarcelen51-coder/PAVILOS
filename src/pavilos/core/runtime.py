@@ -35,6 +35,18 @@ def _wall_now() -> float:
     return time.time()
 
 
+def _loop_exception_handler(loop, context: dict) -> None:
+    """Log an unhandled exception that surfaced in an asyncio callback/task (e.g. a
+    flaky venue's internal ccxt WS callback) and let the loop KEEP RUNNING — one bad
+    venue must never silently kill 24/7 recording. Never raises; ignores benign
+    cancellation/shutdown. The outer supervisor handles whole-process death."""
+    exc = context.get("exception")
+    if isinstance(exc, (asyncio.CancelledError, SystemExit, KeyboardInterrupt)):
+        return
+    msg = context.get("message") or "unhandled asyncio exception"
+    _log.error("asyncio loop exception (logged, recorder continues): %s", msg, exc_info=exc)
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
     symbols: dict = field(default_factory=lambda: dict(_SYMBOLS))
@@ -180,6 +192,7 @@ class Runtime:
         import uvicorn
         from pavilos.web.server import create_app
         stop = stop or asyncio.Event()
+        asyncio.get_running_loop().set_exception_handler(_loop_exception_handler)
         if self.recorder is not None:
             from pavilos.persistence.retention import prune_old_partitions
             prune_old_partitions(self.config.book_data_dir, self.config.book_retention_days)
