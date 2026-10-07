@@ -92,10 +92,13 @@ class RuntimeConfig:
     entry_mode: str = "momentum"       # "momentum" (default, breakout) | "reversion" (bounce at support)
     tp_mult: float = 2.0               # reversion take-profit at tp_mult x risk distance
     # raw-L2 data layer. Recording is ON, writing ONLY inside this new D: folder
-    # (never touches other files on D:). 7-day retention keeps the disk bounded.
+    # (never touches other files on D:). Lossless compact encoding (M17): GB/day measured after deploy.
     book_data_dir: str | None = r"D:\pavilos_book_data"
     book_flush_interval_s: float = 5.0
-    book_retention_days: int = 7
+    book_checkpoint_every_s: float = 60.0   # full live copy of every active book -> replay base + heals drops
+    book_retention_days: int | None = None  # None = ETERNAL: nothing is ever deleted automatically
+    book_min_free_gb: float | None = 100.0  # shared D: floor (GiB, as Explorer shows): below it recording PAUSES
+    book_janitor_every_s: float = 600.0     # how often the floor (and the age limit, if any) is re-checked
 
 
 class Runtime:
@@ -122,9 +125,11 @@ class Runtime:
             from pavilos.persistence.parquet_sink import ParquetSink
             from pavilos.persistence.recorder import BookRecorder
             recorder = BookRecorder(ParquetSink(config.book_data_dir),
-                                    flush_interval_s=config.book_flush_interval_s)
+                                    flush_interval_s=config.book_flush_interval_s,
+                                    rebase_after_s=config.staleness_s)
         engine = Engine(connectors, agg, interval_s=config.snapshot_interval_s,
-                        on_update=(recorder.record if recorder else None))
+                        on_update=(recorder.record if recorder else None),
+                        checkpoint_every_s=(config.book_checkpoint_every_s if recorder else None))
         detector = Detector(size_multiple=config.size_multiple, min_size=config.min_size,
                             max_gap_bps=config.max_gap_bps, max_zone_width_bps=config.max_zone_width_bps,
                             match_overlap_bps=config.match_overlap_bps, grace_s=config.grace_s,
@@ -165,7 +170,8 @@ class Runtime:
             state.update(analysis, brk, engine.health(), engine_state=signal.state,
                          now=now(), staleness_s=config.staleness_s,
                          trades=all_trades[-50:],
-                         summary=summarize(all_trades, base_equity=config.starting_equity))
+                         summary=summarize(all_trades, base_equity=config.starting_equity),
+                         recording=(recorder.status() if recorder is not None else None))
 
         trading_engine = TradingEngine(detector, ATR(window=config.atr_window), signal, broker, observer=observer)
         return cls(engine, trading_engine, state, config, all_trades, trade_log, recorder)
@@ -188,18 +194,50 @@ class Runtime:
             else:
                 break  # clean return (stop observed)
 
+    def _start_recording(self):
+        """Retention pass first (age limit if configured, disk floor -> may start the
+        recorder PAUSED), then the run's start in ``_runs.jsonl`` (the replay resets
+        every book there; no row of this run is stamped below it), then the writer
+        thread, then the janitor that repeats the pass every ``book_janitor_every_s``.
+        Returns the janitor (for ``_stop_recording``)."""
+        from pavilos.persistence.retention import RetentionJanitor
+        recorder = self.recorder
+        janitor = RetentionJanitor(self.config.book_data_dir,
+                                   retention_days=self.config.book_retention_days,
+                                   min_free_gb=self.config.book_min_free_gb,
+                                   every_s=self.config.book_janitor_every_s,
+                                   on_floor=lambda ok: recorder.set_paused(not ok))
+        janitor.run_once()
+        try:
+            from pavilos.persistence.runs import mark_run_start
+            recorder.set_ts_floor(mark_run_start(self.config.book_data_dir))
+        except Exception:
+            _log.exception("recorder start NOT marked in %s: a replay right after this restart "
+                           "may keep the previous run's books for up to staleness_s",
+                           self.config.book_data_dir)
+        recorder.start()
+        janitor.start()
+        return janitor
+
+    def _stop_recording(self, janitor) -> None:
+        # The recorder stops AFTER the engine (caller's order) so the final drained
+        # updates are captured; stop() drains the queue then joins (bounded).
+        if janitor is not None:
+            janitor.stop()
+        self.recorder.stop()
+
     async def run_app(self, stop: "asyncio.Event | None" = None) -> None:
         import uvicorn
         from pavilos.web.server import create_app
         stop = stop or asyncio.Event()
         asyncio.get_running_loop().set_exception_handler(_loop_exception_handler)
-        if self.recorder is not None:
-            from pavilos.persistence.retention import prune_old_partitions
-            prune_old_partitions(self.config.book_data_dir, self.config.book_retention_days)
-            self.recorder.start()
+        janitor = self._start_recording() if self.recorder is not None else None
         await self.engine.start()
+        # log_config=None: uvicorn logs through OUR handlers (logs/pavilos.log) instead of
+        # installing its own stderr handlers, which would bypass the rotating file.
         server = uvicorn.Server(uvicorn.Config(create_app(self.state), host=self.config.host,
-                                               port=self.config.port, log_level="warning"))
+                                               port=self.config.port, log_level="warning",
+                                               log_config=None))
         trading = asyncio.create_task(self._supervise_trading(stop))
         serving = asyncio.create_task(server.serve())
         try:
@@ -208,10 +246,8 @@ class Runtime:
             stop.set()
             server.should_exit = True
             await self.engine.stop()
-            # Stop the recorder AFTER the engine so the final drained updates are
-            # captured; stop() drains the queue then joins (bounded).
             if self.recorder is not None:
-                self.recorder.stop()
+                self._stop_recording(janitor)
             for t in (trading, serving):
                 t.cancel()
             await asyncio.gather(trading, serving, return_exceptions=True)

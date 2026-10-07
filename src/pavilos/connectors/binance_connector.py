@@ -73,7 +73,7 @@ class BinanceConnector:
                         break
                     if msg.get("e") != "depthUpdate":
                         continue
-                    out = feed.apply(msg)               # None if stale; raises on gap
+                    out = feed.apply(msg, ts=self._now())   # receive time; None if stale; raises on gap
                     if out is not None:
                         await out_q.put(out)
                         self._last_update_ts = out.ts

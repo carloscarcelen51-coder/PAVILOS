@@ -20,7 +20,7 @@ def _finite(x):
 _EMPTY: dict = {
     "ts": None, "mid": None, "state": "IDLE", "supports": [], "resistances": [],
     "position": None, "pending": None, "equity": None, "realized_equity": None,
-    "fills": [], "venues": [], "stale": False, "trades": [], "summary": {},
+    "fills": [], "venues": [], "stale": False, "trades": [], "summary": {}, "recording": {},
 }
 
 
@@ -45,7 +45,7 @@ class DashboardState:
 
     def update(self, analysis: DepthAnalysis, broker: PaperBroker, health,
                *, engine_state: str, now: float, staleness_s: float = 15.0,
-               trades=(), summary=None) -> None:
+               trades=(), summary=None, recording=None) -> None:
         pos = broker.position()
         pend = broker.pending_entry()
         fills = broker.fills()[-12:]
@@ -73,5 +73,6 @@ class DashboardState:
             "stale": (now - analysis.ts) > staleness_s,
             "trades": [_trade(t) for t in trades],
             "summary": dict(summary) if summary else {},
+            "recording": dict(recording) if recording else {},
         }
         self._snap = snap  # atomic swap

@@ -419,6 +419,7 @@
 
       <div class="badges">
         <span class="stale-tag" id="stale-tag"><span class="pip"></span>stale feed</span>
+        <span class="stale-tag" id="rec-tag"><span class="pip"></span><span id="rec-msg"></span></span>
         <span class="paper">PAPER</span>
       </div>
 
@@ -553,6 +554,8 @@
     mid:       $("mid"),
     midLine:   $("mid-line"),
     staleTag:  $("stale-tag"),
+    recTag:    $("rec-tag"),
+    recMsg:    $("rec-msg"),
     venues:    $("venues-count"),
     res:       $("res"),
     sup:       $("sup"),
@@ -813,6 +816,14 @@
     var total = vs.length;
     refs.venues.textContent = ok + "/" + total;
     refs.venues.classList.toggle("warn", total > 0 && ok < total);
+
+    var rec = s.recording || {};
+    var recMsg = rec.paused ? "recording paused \u00b7 disk floor"
+               : rec.write_errors_recently ? "recording write errors (" + rec.write_errors + ")"
+               : rec.dropped_recently ? "recording dropped " + rec.dropped
+               : rec.clock_behind_s > 60 ? "recording clock " + Math.round(rec.clock_behind_s) + " s behind" : "";
+    refs.recMsg.textContent = recMsg;
+    refs.recTag.classList.toggle("on", recMsg !== "");
 
     var stale = !!s.stale;
     refs.staleTag.classList.toggle("on", stale);

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import sys
 
-import duckdb
 
 from pavilos.core.runtime import RuntimeConfig
 from pavilos.backtest.replay import replay_snapshots
@@ -55,10 +54,14 @@ _REV_GRID = {"entry_threshold": [0.4, 0.55, 0.7], "entry_zone_bps": [15.0, 30.0,
 
 
 def _lake_span(base_dir: str):
+    from pavilos.persistence.duck import connect     # capped memory, spills outside the repo
+    con = connect()
     try:
-        r = duckdb.sql(f"SELECT min(ts), max(ts), count(*) FROM '{base_dir}/**/*.parquet'").fetchone()
+        r = con.sql(f"SELECT min(ts), max(ts), count(*) FROM '{base_dir}/**/*.parquet'").fetchone()
     except Exception:
         return None
+    finally:
+        con.close()
     if r is None or r[0] is None:
         return None
     return float(r[0]), float(r[1]), int(r[2])

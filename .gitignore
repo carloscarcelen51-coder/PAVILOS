@@ -19,6 +19,7 @@ node_modules/
 dist/
 build/
 *.log
+logs/
 
 # --- Data / runtime artifacts (never commit market data or secrets) ---
 paper_trades*.jsonl

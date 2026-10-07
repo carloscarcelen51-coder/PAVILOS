@@ -36,3 +36,9 @@ def test_dashboard_page_references_trades_and_summary():
     from pavilos.web.server import create_app
     html = TestClient(create_app(DashboardState())).get("/").text
     assert "trades" in html and "summary" in html  # the JS consumes snap.trades + snap.summary
+
+
+def test_dashboard_page_shows_the_recording_status():
+    html = TestClient(create_app(DashboardState())).get("/").text
+    assert 'id="rec-tag"' in html and "recording paused" in html and "s.recording" in html
+    assert "write_errors_recently" in html and "dropped_recently" in html and "clock_behind_s" in html

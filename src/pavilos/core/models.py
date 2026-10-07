@@ -38,6 +38,9 @@ class BookUpdate:
     reset its book to exactly these levels before applying. Prices are in the
     exchange's own quote currency — USD normalization happens downstream.
     ``seq`` is the feed's sequence number when available (else None).
+    ``checkpoint=True`` marks a copy of the aggregator's LIVE book handed to the
+    recorder (never applied live): it is persisted in full so a replay has a base
+    for every ACTIVE venue and any update the recorder dropped is healed.
     """
 
     exchange: str
@@ -46,6 +49,7 @@ class BookUpdate:
     asks: tuple[tuple[float, float], ...]
     is_snapshot: bool
     seq: int | None = None
+    checkpoint: bool = False
 
 
 @dataclass(slots=True, frozen=True)

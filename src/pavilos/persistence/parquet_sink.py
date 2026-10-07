@@ -3,7 +3,10 @@
 zstd-compressed. One file per write() per (date, hour) partition; file names are
 globally unique (pid + monotonic ns + per-partition counter) so concurrent or
 repeated writes — including a fresh sink after a process restart writing into an
-existing partition — never clobber a prior file."""
+existing partition — never clobber a prior file. Each file is written under a
+temporary name and renamed into place, so a process killed mid-write leaves only an
+ignorable ``*.parquet.tmp``, never a truncated ``*.parquet`` (which would break every
+reader of the lake)."""
 from __future__ import annotations
 
 import os
@@ -47,8 +50,17 @@ class ParquetSink:
             # globally unique: collision-proof across fresh sinks (process restart)
             # and concurrent writers, not just within one in-memory counter.
             path = os.path.join(part, f"{os.getpid()}-{time.time_ns()}-{idx:06d}.parquet")
+            tmp = path + ".tmp"
             table = pa.Table.from_pylist(grp, schema=_SCHEMA)
-            pq.write_table(table, path, compression=self._compression)
+            try:
+                pq.write_table(table, tmp, compression=self._compression)
+                os.replace(tmp, path)
+            except Exception:
+                try:
+                    os.remove(tmp)            # e.g. disk full: leave no half-written leftovers
+                except OSError:
+                    pass
+                raise
             written += 1
         return written
 

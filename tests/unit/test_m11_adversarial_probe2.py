@@ -10,7 +10,7 @@ import pytest
 from pavilos.core.models import BookUpdate, VenueSpec, Quote, Tier, DepthBin, CombinedDepthSnapshot
 from pavilos.persistence.parquet_sink import ParquetSink
 import pavilos.backtest.replay as replay_mod
-from pavilos.backtest.replay import replay_snapshots, _iter_updates
+from pavilos.backtest.replay import replay_snapshots, iter_lake  # noqa: F401 (streaming API)
 from pavilos.core.runtime import RuntimeConfig
 from pavilos.backtest.analysis import window_sweep, detection_profile
 
@@ -107,7 +107,7 @@ def test_empty_and_missing_lake(tmp_path, monkeypatch):
 
 
 def test_uses_fetchmany_streaming_not_fetchall():
-    """Source-level proof: _iter_updates uses res.fetchmany(...) and never fetchall()."""
+    """Source-level proof: iter_lake uses res.fetchmany(...) and never fetchall()."""
     src = open(os.path.join(os.path.dirname(replay_mod.__file__), "replay.py")).read()
     tree = ast.parse(src)
     calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]

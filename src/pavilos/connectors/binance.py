@@ -38,16 +38,17 @@ class BinanceDepthFeed:
             seq=self._last_update_id,
         )
 
-    def apply(self, event: dict) -> BookUpdate | None:
+    def apply(self, event: dict, *, ts: float | None = None) -> BookUpdate | None:
         """Apply one ``depthUpdate`` event.
 
         Returns an update ``BookUpdate``, or ``None`` if the event is stale
         (``u <= last_update_id``). Raises ``ResyncRequired`` if not seeded or on a
         gap (``U > last_update_id + 1``). Absolute sizes; ``qty == "0"`` removals
-        are passed through verbatim (BookState removes them on apply). The emitted
-        ``ts`` is the exchange event time (``E``/1000); ``seed`` instead uses the
-        caller-supplied receive time, so treat this feed's ``BookUpdate.ts`` as a
-        mixed clock (ordering relies on ``seq``, not ``ts``)."""
+        are passed through verbatim (BookState removes them on apply). ``ts`` is the
+        caller's RECEIVE time -- the clock of the seed and of every other venue, so a
+        recording replays binance aligned with the rest exactly as live saw it (M17).
+        Without it, the exchange event time ``E``/1000 (a different clock: on
+        2026-10-06 the PC ran ~0.3 s behind binance)."""
         if self._last_update_id is None:
             raise ResyncRequired("binance: apply before seed")
         first_id = int(event["U"])
@@ -61,7 +62,7 @@ class BinanceDepthFeed:
         self._last_update_id = final_id
         return BookUpdate(
             exchange=self.exchange,
-            ts=float(event["E"]) / 1000.0,
+            ts=float(event["E"]) / 1000.0 if ts is None else ts,
             bids=_levels(event["b"]),
             asks=_levels(event["a"]),
             is_snapshot=False,

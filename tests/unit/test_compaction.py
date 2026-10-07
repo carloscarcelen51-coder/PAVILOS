@@ -146,7 +146,7 @@ def test_compact_lake_continues_past_corrupt_partition(tmp_path):
     bad_file = next(p for p in os.listdir(bad_part) if p.endswith(".parquet"))
     with open(os.path.join(bad_part, bad_file), "wb") as fh:
         fh.write(b"not a parquet file")
-    now = _hour_ts("2026-06-01", "14")          # all of 10/11/13 are closed
+    now = _hour_ts("2026-06-01", "14") + 1800   # all of 10/11/13 closed and past the grace
     summary = compact_lake(base, now_ts=now)
     h10 = _part_dir(base, "kraken", "2026-06-01", "10")
     h13 = _part_dir(base, "kraken", "2026-06-01", "13")
@@ -247,3 +247,190 @@ def test_compact_partition_recovers_crash_after_replace(tmp_path):
     assert after == ["compacted.parquet"]            # leftover raw cleaned up
     assert res.get("recovered") is True
     assert _rowset([os.path.join(part, "compacted.parquet")]) == real_rows   # NOT doubled
+
+
+# --- M17: late rows into a just-closed hour (checkpoint ts = last_ts, 5 s flushes) ---
+
+def _late_file(part, date, hour, n=5, seq0=10_000):
+    """A raw file written into ``part`` AFTER it was compacted (distinct rows)."""
+    import pyarrow as pa
+    rows = [{"seq_no": seq0 + i, "ts": _hour_ts(date, hour) + 3599.5, "exchange": "kraken",
+             "is_snapshot": False, "side": "ask", "price": 64000.0 + i, "size": 2.0}
+            for i in range(n)]
+    path = os.path.join(part, f"99999-{seq0}-000000.parquet")
+    pq.write_table(pa.Table.from_pylist(rows), path, compression="zstd")
+    return path
+
+
+def test_compact_lake_waits_for_the_grace_after_the_hour_ends(tmp_path):
+    base = str(tmp_path)
+    _seed_partition(base, "kraken", "2026-06-01", "10", n_files=3, rows_per=4)
+    part = _part_dir(base, "kraken", "2026-06-01", "10")
+    just_closed = _hour_ts("2026-06-01", "11") + 60          # hour 10 ended 60 s ago
+    assert count_compactable(base, now_ts=just_closed) == {"partitions": 0, "files": 0}
+    assert compact_lake(base, now_ts=just_closed)["partitions_compacted"] == 0
+    assert len([p for p in os.listdir(part) if p.endswith(".parquet")]) == 3
+    after_grace = _hour_ts("2026-06-01", "11") + 900
+    assert count_compactable(base, now_ts=after_grace) == {"partitions": 1, "files": 3}
+    assert compact_lake(base, now_ts=after_grace)["partitions_compacted"] == 1
+    assert os.listdir(part) == ["compacted.parquet"]
+
+
+def test_late_file_after_compaction_is_merged_not_deleted(tmp_path):
+    base = str(tmp_path)
+    _seed_partition(base, "kraken", "2026-06-01", "05", n_files=3, rows_per=6)
+    part = _part_dir(base, "kraken", "2026-06-01", "05")
+    orig = _rowset([os.path.join(part, f) for f in os.listdir(part)])
+    assert compact_partition(part)["compacted"] is True
+    late = _late_file(part, "2026-06-01", "05")
+    late_rows = _rowset([late])
+    res = compact_partition(part)
+    assert res.get("late_merged") == 1
+    assert os.listdir(part) == ["compacted.parquet"]
+    assert _rowset([os.path.join(part, "compacted.parquet")]) == sorted(orig + late_rows)
+    # idempotent: a re-run neither doubles nor loses anything
+    compact_partition(part)
+    assert _rowset([os.path.join(part, "compacted.parquet")]) == sorted(orig + late_rows)
+
+
+def test_absorbed_leftover_and_late_file_together(tmp_path):
+    """A crash leftover (already inside compacted.parquet) is deleted, never re-merged;
+    a late file next to it is merged. Nothing doubled, nothing lost."""
+    import pyarrow as pa
+    base = str(tmp_path)
+    _seed_partition(base, "okx", "2026-06-01", "04", n_files=3, rows_per=6)
+    part = _part_dir(base, "okx", "2026-06-01", "04")
+    real = sorted(os.path.join(part, f) for f in os.listdir(part))
+    orig = _rowset(real)
+    tbl = pa.concat_tables([pq.ParquetFile(p).read() for p in real])
+    pq.write_table(tbl, os.path.join(part, "compacted.parquet"), compression="zstd")
+    for p in real[1:]:
+        os.remove(p)                                   # crash left ONE absorbed original
+    late = _late_file(part, "2026-06-01", "04", seq0=20_000)
+    late_rows = _rowset([late])
+    res = compact_partition(part)
+    assert res.get("late_merged") == 1
+    assert os.listdir(part) == ["compacted.parquet"]
+    assert _rowset([os.path.join(part, "compacted.parquet")]) == sorted(orig + late_rows)
+
+
+def test_failed_late_merge_keeps_both_files_intact(tmp_path, monkeypatch):
+    import pavilos.persistence.compaction as comp
+    base = str(tmp_path)
+    _seed_partition(base, "kraken", "2026-06-01", "06", n_files=3, rows_per=6)
+    part = _part_dir(base, "kraken", "2026-06-01", "06")
+    compact_partition(part)
+    final = os.path.join(part, "compacted.parquet")
+    before = _rowset([final])
+    late = _late_file(part, "2026-06-01", "06")
+    monkeypatch.setattr(comp, "_rows_equal", lambda merged, origs: False)
+    try:
+        compact_partition(part)
+        raise AssertionError("verify failure must raise")
+    except ValueError:
+        pass
+    assert sorted(os.listdir(part)) == sorted(["compacted.parquet", os.path.basename(late)])
+    assert _rowset([final]) == before                  # compacted untouched
+
+
+def test_crash_leftovers_are_settled_with_one_containment_query(tmp_path, monkeypatch):
+    import pyarrow as pa
+    import pavilos.persistence.compaction as comp
+    base = str(tmp_path)
+    _seed_partition(base, "kraken", "2026-06-01", "07", n_files=5, rows_per=4)
+    part = _part_dir(base, "kraken", "2026-06-01", "07")
+    real = sorted(os.path.join(part, f) for f in os.listdir(part))
+    orig = _rowset(real)
+    tbl = pa.concat_tables([pq.ParquetFile(p).read() for p in real])
+    pq.write_table(tbl, os.path.join(part, "compacted.parquet"), compression="zstd")
+    calls = []
+    real_contained = comp._contained
+    monkeypatch.setattr(comp, "_contained",
+                        lambda paths, final: calls.append(len(paths)) or real_contained(paths, final))
+    compact_partition(part)
+    assert calls == [5]                                  # one query for all five leftovers
+    assert os.listdir(part) == ["compacted.parquet"]
+    assert _rowset([os.path.join(part, "compacted.parquet")]) == orig
+
+
+def test_failed_replace_leaves_no_temp_and_the_next_pass_merges(tmp_path, monkeypatch):
+    import pytest
+    import pavilos.persistence.compaction as comp
+    base = str(tmp_path)
+    _seed_partition(base, "kraken", "2026-06-01", "08", n_files=3, rows_per=4)
+    part = _part_dir(base, "kraken", "2026-06-01", "08")
+    compact_partition(part)
+    final = os.path.join(part, "compacted.parquet")
+    before = _rowset([final])
+    late = _late_file(part, "2026-06-01", "08")
+    late_rows = _rowset([late])
+    real_replace = comp.os.replace
+
+    def locked(src, dst):
+        raise PermissionError(5, "Access is denied (a reader holds the file)")
+
+    monkeypatch.setattr(comp.os, "replace", locked)
+    with pytest.raises(PermissionError):
+        compact_partition(part)
+    monkeypatch.setattr(comp.os, "replace", real_replace)
+    assert sorted(os.listdir(part)) == sorted(["compacted.parquet", os.path.basename(late)])
+    assert _rowset([final]) == before
+    compact_partition(part)                              # the reader is gone: merged now
+    assert os.listdir(part) == ["compacted.parquet"]
+    assert _rowset([final]) == sorted(before + late_rows)
+
+
+def test_only_one_compaction_runs_at_a_time(tmp_path):
+    import pytest
+    base = str(tmp_path)
+    _seed_partition(base, "kraken", "2026-06-01", "05", n_files=3, rows_per=4)
+    lock = os.path.join(base, "_compaction.lock")
+    open(lock, "w").close()                                # another run holds it
+    with pytest.raises(RuntimeError, match="another compaction"):
+        compact_lake(base, now_ts=_hour_ts("2026-06-01", "12"))
+    part = _part_dir(base, "kraken", "2026-06-01", "05")
+    assert len([f for f in os.listdir(part) if f.endswith(".parquet")]) == 3   # untouched
+    os.remove(lock)
+    assert compact_lake(base, now_ts=_hour_ts("2026-06-01", "12"))["partitions_compacted"] == 1
+    assert not os.path.exists(lock)                        # released after the run
+
+
+def test_a_partition_with_an_unreadable_file_is_left_untouched(tmp_path):
+    import pytest
+    import pavilos.persistence.compaction as comp
+    base = str(tmp_path)
+    _seed_partition(base, "kraken", "2026-06-01", "09", n_files=3, rows_per=4)
+    part = _part_dir(base, "kraken", "2026-06-01", "09")
+    with open(os.path.join(part, "killed.parquet"), "wb") as fh:
+        fh.write(b"PAR1 then the recorder was killed")
+    before = sorted(os.listdir(part))
+    with pytest.raises(comp.UnreadableFiles):
+        compact_partition(part)
+    assert sorted(os.listdir(part)) == before                # nothing merged, deleted or left
+
+
+def test_a_failed_copy_leaves_no_temp(tmp_path, monkeypatch):
+    import pytest
+    import pavilos.persistence.compaction as comp
+    base = str(tmp_path)
+    _seed_partition(base, "kraken", "2026-06-01", "10", n_files=3, rows_per=4)
+    part = _part_dir(base, "kraken", "2026-06-01", "10")
+    before = sorted(os.listdir(part))
+    real = comp._connect
+
+    class _Con:
+        def __init__(self):
+            self._c = real()
+        def sql(self, q):
+            if q.startswith("COPY"):
+                tmp = q.split(" TO '", 1)[1].split("'", 1)[0]
+                open(tmp, "wb").close()                      # what a failed COPY leaves
+                raise OSError("disk full during COPY")
+            return self._c.sql(q)
+        def close(self):
+            self._c.close()
+
+    monkeypatch.setattr(comp, "_connect", _Con)
+    with pytest.raises(OSError):
+        compact_partition(part)
+    assert sorted(os.listdir(part)) == before

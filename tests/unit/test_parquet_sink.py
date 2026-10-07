@@ -42,3 +42,48 @@ def test_fresh_sink_does_not_overwrite_prior_partition_file(tmp_path):
     prices = {row[0] for row in duckdb.sql(
         f"SELECT price FROM '{tmp_path}/**/*.parquet'").fetchall()}
     assert prices == {100.0, 200.0}   # both runs' rows survive
+
+
+def test_a_write_killed_midway_leaves_no_parquet_file(tmp_path, monkeypatch):
+    import os
+    import pyarrow.parquet as pq_mod
+    import pavilos.persistence.parquet_sink as ps
+    real = pq_mod.write_table
+
+    def dies_midway(table, where, **kw):
+        with open(where, "wb") as fh:
+            fh.write(b"PAR1 half a file")                    # what a kill mid-write leaves
+        raise KeyboardInterrupt("process killed")
+
+    monkeypatch.setattr(ps.pq, "write_table", dies_midway)
+    sink = ps.ParquetSink(str(tmp_path))
+    row = {"seq_no": 0, "ts": 3600.0, "exchange": "kraken", "is_snapshot": True,
+           "side": "bid", "price": 1.0, "size": 1.0}
+    try:
+        sink.write("kraken", [row])
+    except KeyboardInterrupt:
+        pass
+    names = [n for _, _, fs in os.walk(tmp_path) for n in fs]
+    assert names and not any(n.endswith(".parquet") for n in names)       # only *.parquet.tmp
+    monkeypatch.setattr(ps.pq, "write_table", real)
+    sink.write("kraken", [row])
+    names = [n for _, _, fs in os.walk(tmp_path) for n in fs]
+    assert sum(n.endswith(".parquet") for n in names) == 1
+
+
+def test_an_ordinary_write_failure_leaves_no_tmp(tmp_path, monkeypatch):
+    import os
+    import pytest
+    import pavilos.persistence.parquet_sink as ps
+
+    def disk_full(table, where, **kw):
+        with open(where, "wb") as fh:
+            fh.write(b"PAR1 partial")
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(ps.pq, "write_table", disk_full)
+    row = {"seq_no": 0, "ts": 3600.0, "exchange": "kraken", "is_snapshot": True,
+           "side": "bid", "price": 1.0, "size": 1.0}
+    with pytest.raises(OSError):
+        ps.ParquetSink(str(tmp_path)).write("kraken", [row])
+    assert [n for _, _, fs in os.walk(tmp_path) for n in fs] == []

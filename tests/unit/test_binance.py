@@ -85,3 +85,10 @@ def test_single_id_boundary_event_applies():
     # event covering exactly one id at the boundary: U == u == last+1 == 101
     u = feed.apply(_event(U=101, u=101, bids=[["100.0", "1.5"]], asks=[]))
     assert u is not None and u.seq == 101
+
+
+def test_apply_uses_the_callers_receive_time_when_given():
+    feed = BinanceDepthFeed("BTCUSDT")
+    feed.seed({"lastUpdateId": 100, "bids": [["100.0", "1.0"]], "asks": [["101.0", "1.0"]]}, ts=5.0)
+    u = feed.apply(_event(U=101, u=102, bids=[["100.0", "2.0"]], asks=[], E=6_000), ts=5.25)
+    assert u.ts == 5.25

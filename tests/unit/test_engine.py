@@ -64,3 +64,31 @@ def test_engine_stop_cancels_a_wedged_connector():
         return True
 
     assert asyncio.run(scenario()) is True
+
+
+def test_engine_forwards_periodic_checkpoints_to_on_update():
+    specs = [VenueSpec("kraken", Quote.USD, Tier.A)]
+    snap = _snap("kraken", 1.0, [(100.0, 1.0)], [(101.0, 1.0)])
+    seen = []
+    clock = {"t": 1.0}
+
+    def now():
+        clock["t"] += 0.5                  # every call advances the fake clock
+        return clock["t"]
+
+    async def scenario():
+        agg = Aggregator(specs, PegProvider(), bin_bps=100.0, window_bps=200.0, staleness_s=1e9)
+        engine = Engine([_FakeConnector("kraken", [snap])], agg, interval_s=0.0, now=now,
+                        on_update=seen.append, checkpoint_every_s=2.0)
+        await engine.start()
+        for _ in range(2000):
+            if any(u.checkpoint for u in seen):
+                break
+            await asyncio.sleep(0)
+        await engine.stop()
+
+    asyncio.run(scenario())
+    cks = [u for u in seen if u.checkpoint]
+    assert seen[0] is snap                              # the live update itself, untouched
+    assert cks and cks[0].exchange == "kraken" and cks[0].is_snapshot
+    assert cks[0].ts == 1.0 and dict(cks[0].bids) == {100.0: 1.0}   # ts = last_ts, live book

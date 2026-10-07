@@ -84,3 +84,12 @@ def test_non_finite_mid_sanitized_to_none():
     assert snap["mid"] is None
     assert snap["equity"] is None or math.isfinite(snap["equity"])
     assert snap["realized_equity"] is None or math.isfinite(snap["realized_equity"])
+
+
+def test_update_carries_the_recording_status():
+    st = DashboardState()
+    assert st.snapshot()["recording"] == {}
+    bk = PaperBroker(starting_equity=10_000.0, taker_fee=0.0, maker_fee=0.0)
+    st.update(_analysis(), bk, [], engine_state="IDLE", now=10.0,
+              recording={"paused": True, "dropped": 3, "paused_skipped": 7})
+    assert st.snapshot()["recording"] == {"paused": True, "dropped": 3, "paused_skipped": 7}

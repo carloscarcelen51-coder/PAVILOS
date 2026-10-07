@@ -7,7 +7,7 @@ import asyncio
 from collections.abc import Callable, Sequence
 
 from pavilos.core.models import BookUpdate, CombinedDepthSnapshot
-from pavilos.aggregator.aggregator import Aggregator
+from pavilos.aggregator.aggregator import Aggregator, check_checkpoint_every
 from pavilos.connectors.base import ConnectorHealth
 
 
@@ -24,12 +24,15 @@ class Engine:
         interval_s: float = 0.1,
         now: Callable[[], float] | None = None,
         on_update: Callable[[BookUpdate], None] | None = None,
+        checkpoint_every_s: float | None = None,
     ) -> None:
         self._connectors = list(connectors)
         self._aggregator = aggregator
         self._interval_s = interval_s
         self._now = now or _wall_now
         self._on_update = on_update
+        check_checkpoint_every(checkpoint_every_s)           # fail at build time, not in a task
+        self._checkpoint_every_s = checkpoint_every_s
         self._updates: "asyncio.Queue[BookUpdate]" = asyncio.Queue()
         self.snapshots: "asyncio.Queue[CombinedDepthSnapshot]" = asyncio.Queue()
         self._stop = asyncio.Event()
@@ -41,7 +44,8 @@ class Engine:
             self._tasks.append(asyncio.create_task(c.run(self._updates, self._stop)))
         self._tasks.append(asyncio.create_task(
             self._aggregator.run(self._updates, self.snapshots, interval_s=self._interval_s,
-                                 now=self._now, stop=self._stop, on_update=self._on_update)
+                                 now=self._now, stop=self._stop, on_update=self._on_update,
+                                 checkpoint_every_s=self._checkpoint_every_s)
         ))
 
     async def stop(self, *, grace: float = 2.0) -> None:

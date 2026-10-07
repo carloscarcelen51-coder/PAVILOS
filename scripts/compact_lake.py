@@ -23,7 +23,11 @@ def main() -> None:
               f"{c['files']} parquet files (would merge to ~{c['partitions']})")
         return
     print(f"compacting {base} (closed partitions only)...")
-    s = compact_lake(base)
+    try:
+        s = compact_lake(base)
+    except RuntimeError as e:          # another run holds the lock
+        print(f"NOT RUN: {e}")
+        sys.exit(1)
     print(f"done: {s['partitions_compacted']} partitions compacted, "
           f"{s['files_removed']} files removed, {s['partitions_skipped']} skipped")
 

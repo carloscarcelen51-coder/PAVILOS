@@ -55,6 +55,9 @@ def test_seeds_then_applies_contiguous_events():
     assert snap.is_snapshot is True and snap.seq == 100 and snap.exchange == "binance"
     assert u1.is_snapshot is False and u1.seq == 105
     assert u2.seq == 108
+    # deltas carry the RECEIVE time (the injected clock), like the seed and every other
+    # venue -- not the exchange's event time E (6.0 / 7.0)
+    assert snap.ts == u1.ts == u2.ts == 5.0
 
 
 def test_gap_triggers_reseed():

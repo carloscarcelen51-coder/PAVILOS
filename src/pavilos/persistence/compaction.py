@@ -7,28 +7,12 @@ from __future__ import annotations
 import calendar
 import logging
 import os
-import tempfile
 import time
 
-import duckdb
+from pavilos.persistence.duck import connect as _connect   # memory-capped, known spill dir
+from pavilos.persistence.lake_files import check_files
 
 _log = logging.getLogger(__name__)
-
-#: Hard cap on DuckDB RAM. Compacting/verifying a multi-million-row deep-book
-#: partition would otherwise build large hash tables / buffers and spike to many
-#: GB (a prior run OOM'd and segfaulted). With this cap DuckDB SPILLS to disk
-#: instead, keeping memory bounded regardless of partition size.
-_DUCKDB_MEM_LIMIT = "3GB"
-_SPILL_DIR = os.path.join(tempfile.gettempdir(), "pavilos_duckdb_spill")
-
-
-def _connect():
-    """A memory-capped DuckDB connection (spills to disk past the cap)."""
-    os.makedirs(_SPILL_DIR, exist_ok=True)
-    con = duckdb.connect()
-    con.sql(f"SET memory_limit='{_DUCKDB_MEM_LIMIT}'")
-    con.sql(f"SET temp_directory='{_SPILL_DIR.replace(chr(92), '/')}'")
-    return con
 
 
 def _sql_files(paths: list[str]) -> str:
@@ -65,6 +49,16 @@ _TEMP_PREFIX = "_compacted"
 _FINAL_NAME = "compacted.parquet"
 
 
+class UnreadableFiles(RuntimeError):
+    """A partition holds a Parquet file that cannot be read: it is left untouched."""
+
+#: An hour is compacted only once it ended at least this long ago. The recorder can
+#: still write into a just-closed hour: rows are partitioned by their own ``ts``, the
+#: writer flushes every ~5 s, and an M17 checkpoint carries ``ts = last_ts`` of its
+#: venue (up to the 15 s staleness bound). 15 min covers that with a wide margin.
+_GRACE_S = 900.0
+
+
 def compact_partition(part_dir: str) -> dict:
     """Merge all *.parquet in ``part_dir`` into one, verified-lossless and
     **crash-safe**. Intended for a CLOSED partition (a past hour the recorder will
@@ -78,9 +72,12 @@ def compact_partition(part_dir: str) -> dict:
     no duplication, wherever the process dies:
 
     - **A ``compacted.parquet`` already exists** → it is authoritative (written
-      only after a passing verify). Any leftover raw files are rows it already
-      absorbed (a crash after the replace, before the delete); delete them — never
-      re-merge them (that would double the data). Idempotent re-runs land here too.
+      only after a passing verify). A leftover raw file whose rows it already
+      CONTAINS was absorbed (a crash after the replace, before the delete): delete
+      it — never re-merge it (that would double the data). A raw file it does NOT
+      contain was written LATE, after the hour was compacted: merge it in with the
+      same verify-then-promote-then-delete sequence (deleting it unmerged would
+      lose it). Idempotent re-runs land here too.
     - **Only a temp survives** (no ``compacted.parquet``, no raw) → the temp was
       written and verified before anything was deleted, so it is a complete copy;
       promote it rather than lose it. (Cannot arise under promote-then-delete, but
@@ -100,11 +97,34 @@ def compact_partition(part_dir: str) -> dict:
                  if f.endswith(".parquet") and f != _FINAL_NAME
                  and not f.startswith(_TEMP_PREFIX) and _is_file(f))
 
+    # Never merge or delete around an unreadable file (a writer killed mid-write before
+    # writes became atomic, a damaged footer): leave the hour as it is and say so.
+    unreadable = check_files([os.path.join(part_dir, f) for f in raw]
+                             + ([final_path] if os.path.isfile(final_path) else []))[1]
+    if unreadable:
+        raise UnreadableFiles(f"{len(unreadable)} unreadable parquet file(s) in {part_dir} "
+                              f"({[os.path.basename(p) for p in unreadable[:5]]}); left as is")
+
     # RULE 1: a committed compacted.parquet is the authoritative full copy.
     if os.path.isfile(final_path):
-        for f in temps + raw:                 # leftover raw are already absorbed; never re-merge
+        for f in temps:
             os.remove(os.path.join(part_dir, f))
-        return {"skipped": True, "files": 1, "recovered": bool(temps or raw)}
+        paths = [os.path.join(part_dir, f) for f in raw]
+        # The common case (a crash after the replace) is settled with ONE query; only
+        # when something is not contained is each file checked on its own.
+        absorbed = paths if paths and _contained(paths, final_path) else [
+            p for p in paths if _contained([p], final_path)]
+        late = [p for p in paths if p not in absorbed]
+        for p in absorbed:
+            os.remove(p)                      # absorbed before a crash: never re-merge
+        if not late:
+            return {"skipped": True, "files": 1, "recovered": bool(temps or raw)}
+        nrows = _merge_verified(part_dir, [final_path] + late, final_path)
+        for p in late:
+            os.remove(p)
+        _log.warning("compaction: merged %d late file(s) into %s", len(late), final_path)
+        return {"compacted": True, "files_before": 1 + len(late), "rows": nrows,
+                "late_merged": len(late)}
 
     # RULE 2 (defensive): only a temp survived -> it is complete+verified, promote it.
     if temps and not raw:
@@ -123,6 +143,30 @@ def compact_partition(part_dir: str) -> dict:
         return {"skipped": True, "files": len(raw)}
 
     paths = [os.path.join(part_dir, f) for f in raw]
+    nrows = _merge_verified(part_dir, paths, final_path)
+    # PROMOTE-THEN-DELETE: the verified merged file has landed atomically (a crash
+    # after this is cleaned up by RULE 1 next run; a crash before it leaves the raw
+    # originals intact); only now delete the absorbed originals.
+    for p in paths:
+        os.remove(p)
+    return {"compacted": True, "files_before": len(raw), "rows": nrows}
+
+
+def _contained(paths: list[str], final_path: str) -> bool:
+    """True iff every row of ``paths`` (as a multiset) is in ``final_path``."""
+    con = _connect()
+    try:
+        return con.sql(
+            f"SELECT count(*) FROM (SELECT * FROM {_sql_files(paths)} "
+            f"EXCEPT ALL SELECT * FROM {_sql_files([final_path])})").fetchone()[0] == 0
+    finally:
+        con.close()
+
+
+def _merge_verified(part_dir: str, inputs: list[str], final_path: str) -> int:
+    """Merge ``inputs`` into a temp, verify its row multiset equals theirs, then
+    atomically ``os.replace`` it onto ``final_path``. Deletes nothing else (the
+    caller removes the absorbed inputs afterwards). Returns the merged row count."""
     tmp = os.path.join(part_dir, f"{_TEMP_PREFIX}_{os.getpid()}.parquet")
     # STREAM the merge through DuckDB (read the file list -> write ONE zstd file) so
     # memory stays bounded even on multi-million-row deep-book partitions. An arrow
@@ -131,24 +175,28 @@ def compact_partition(part_dir: str) -> dict:
     tmp_sql = "'" + tmp.replace("\\", "/").replace("'", "''") + "'"
     con = _connect()
     try:
-        con.sql(f"COPY (SELECT * FROM {_sql_files(paths)}) TO {tmp_sql} (FORMAT parquet, COMPRESSION zstd)")
+        con.sql(f"COPY (SELECT * FROM {_sql_files(inputs)}) TO {tmp_sql} (FORMAT parquet, COMPRESSION zstd)")
         nrows = con.sql(f"SELECT count(*) FROM {_sql_files([tmp])}").fetchone()[0]
-    finally:
-        con.close()
-    try:
-        if not _rows_equal(tmp, paths):
-            raise ValueError(f"compaction verify FAILED for {part_dir}; keeping originals")
     except Exception:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        con.close()
+        _remove_quietly(tmp)          # a failed COPY can leave a partial/0-byte temp behind
         raise
-    # PROMOTE-THEN-DELETE: land the verified merged file atomically FIRST (a crash
-    # after this is cleaned up by RULE 1 next run; a crash before it leaves the raw
-    # originals intact), THEN delete the now-absorbed originals.
-    os.replace(tmp, final_path)
-    for p in paths:
-        os.remove(p)
-    return {"compacted": True, "files_before": len(raw), "rows": nrows}
+    con.close()
+    try:
+        if not _rows_equal(tmp, inputs):
+            raise ValueError(f"compaction verify FAILED for {part_dir}; keeping originals")
+        os.replace(tmp, final_path)   # Windows: fails while a reader holds final_path open
+    except Exception:
+        _remove_quietly(tmp)          # tidy up; a leftover temp is also cleaned next pass
+        raise
+    return nrows
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _partition_hour_epoch(date: str, hour: str) -> float:
@@ -157,10 +205,11 @@ def _partition_hour_epoch(date: str, hour: str) -> float:
     return float(calendar.timegm(time.strptime(f"{date} {hour}", "%Y-%m-%d %H")))
 
 
-def _iter_closed_partitions(base_dir: str, cur_hour: float):
-    """Yield ``part_dir`` for every CLOSED partition (hour strictly before the
-    current hour). Shared by the real run and the dry-run preview so they agree
-    by construction — neither counts the live/current hour the recorder owns."""
+def _iter_closed_partitions(base_dir: str, closed_until: float):
+    """Yield ``part_dir`` for every CLOSED partition: its hour ENDED at or before
+    ``closed_until`` (= now - grace). Shared by the real run and the dry-run preview
+    so they agree by construction — neither counts the live/current hour the
+    recorder owns, nor a just-closed hour that may still receive late rows."""
     for ex in sorted(os.listdir(base_dir)):
         if not ex.startswith("exchange="):
             continue
@@ -177,22 +226,24 @@ def _iter_closed_partitions(base_dir: str, cur_hour: float):
                     hour_epoch = _partition_hour_epoch(d[len("date="):], hh)
                 except ValueError:
                     continue
-                if hour_epoch + 3600 > cur_hour:   # live/current hour -> skip
+                if hour_epoch + 3600 > closed_until:   # live or within the grace -> skip
                     continue
                 yield part
 
 
-def count_compactable(base_dir: str, *, now_ts: float | None = None) -> dict:
+def count_compactable(base_dir: str, *, now_ts: float | None = None,
+                      grace_s: float = _GRACE_S) -> dict:
     """Read-only preview: count CLOSED multi-file partitions (and the real parquet
     files in them) that ``compact_lake`` would merge. Uses the same closed-partition
     predicate as the real run and ignores temp/output files (``_compacted*``), so
-    the dry-run never over-counts the live hour or stray temps."""
+    the dry-run never over-counts the live hour or stray temps. It does not open the
+    files: an hour holding an unreadable file is counted here and then left untouched
+    (reported) by ``compact_lake``."""
     if not os.path.isdir(base_dir):
         return {"partitions": 0, "files": 0}
     now = time.time() if now_ts is None else now_ts
-    cur_hour = now - (now % 3600)
     parts = files = 0
-    for part in _iter_closed_partitions(base_dir, cur_hour):
+    for part in _iter_closed_partitions(base_dir, now - grace_s):
         real = [f for f in os.listdir(part)
                 if f.endswith(".parquet")
                 and not f.startswith(_TEMP_PREFIX)
@@ -203,16 +254,35 @@ def count_compactable(base_dir: str, *, now_ts: float | None = None) -> dict:
     return {"partitions": parts, "files": files}
 
 
-def compact_lake(base_dir: str, *, now_ts: float | None = None) -> dict:
-    """Compact every CLOSED partition (hour strictly before the current hour).
-    Skips the live partition the recorder is appending to."""
+_LOCK_NAME = "_compaction.lock"
+
+
+def compact_lake(base_dir: str, *, now_ts: float | None = None,
+                 grace_s: float = _GRACE_S) -> dict:
+    """Compact every CLOSED partition (its hour ended >= ``grace_s`` ago). Skips the
+    live partition the recorder is appending to and any just-closed hour that can
+    still receive late rows. One run at a time: ``_compaction.lock`` in the lake root
+    (two overlapping runs could each delete a late file the other had not merged)."""
     if not os.path.isdir(base_dir):
         return {"partitions_compacted": 0, "partitions_skipped": 0,
                 "files_removed": 0, "partitions_failed": 0}
-    now = time.time() if now_ts is None else now_ts
-    cur_hour = now - (now % 3600)            # start of the current hour (UTC epoch)
+    lock = os.path.join(base_dir, _LOCK_NAME)
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise RuntimeError(f"another compaction holds {lock}; if none is running (a killed "
+                           f"run), delete that file and retry") from None
+    with os.fdopen(fd, "w") as fh:
+        fh.write(f"pid={os.getpid()} started={time.strftime('%Y-%m-%d %H:%M:%SZ', time.gmtime())}\n")
+    try:
+        return _compact_closed(base_dir, time.time() if now_ts is None else now_ts, grace_s)
+    finally:
+        os.remove(lock)
+
+
+def _compact_closed(base_dir: str, now: float, grace_s: float) -> dict:
     compacted = skipped = files_removed = failed = 0
-    for part in _iter_closed_partitions(base_dir, cur_hour):
+    for part in _iter_closed_partitions(base_dir, now - grace_s):
         n_before = len([f for f in os.listdir(part) if f.endswith(".parquet")])
         try:
             res = compact_partition(part)

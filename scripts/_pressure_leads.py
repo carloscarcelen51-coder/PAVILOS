@@ -18,41 +18,13 @@ import json
 import sys
 from statistics import mean
 
-import duckdb
-
-from pavilos.core.models import BookUpdate
-from pavilos.aggregator.aggregator import Aggregator
-from pavilos.aggregator.normalize import PegProvider
-from pavilos.connectors.venues import VENUE_SPECS
 from pavilos.core.runtime import RuntimeConfig
+from pavilos.backtest.replay import replay_snapshots
 
 BASE = r"D:\pavilos_book_data"
 EXCLUDE = ("gemini", "kucoin")
 BANDS = (10.0, 30.0, 100.0)        # imbalance bands (bps from mid)
 HORIZONS = (5.0, 30.0, 60.0, 300.0)
-
-
-def _iter_updates(t0, t1):
-    con = duckdb.connect(); con.sql("SET memory_limit='4GB'")
-    excl = ",".join("'" + e + "'" for e in EXCLUDE)
-    res = con.execute(
-        f"SELECT ts,exchange,seq_no,is_snapshot,side,price,size FROM '{BASE}/**/*.parquet' "
-        f"WHERE ts>=? AND ts<=? AND exchange NOT IN ({excl}) ORDER BY ts,exchange,seq_no",
-        [float(t0), float(t1)])
-    key = None; ts = ex = snap = None; bids: list = []; asks: list = []
-    while True:
-        rows = res.fetchmany(50000)
-        if not rows:
-            break
-        for r_ts, r_ex, r_seq, r_snap, side, price, size in rows:
-            k = (r_ts, r_ex, r_seq)
-            if k != key:
-                if key is not None:
-                    yield BookUpdate(exchange=ex, ts=ts, bids=tuple(bids), asks=tuple(asks), is_snapshot=snap, seq=None)
-                key = k; ts = r_ts; ex = r_ex; snap = r_snap; bids = []; asks = []
-            (bids if side == "bid" else asks).append((price, size))
-    if key is not None:
-        yield BookUpdate(exchange=ex, ts=ts, bids=tuple(bids), asks=tuple(asks), is_snapshot=snap, seq=None)
 
 
 def _imbalance(snap, mid, band_bps):
@@ -86,22 +58,10 @@ def _quintile_spread(pairs):
 def main():
     t0, t1 = float(sys.argv[1]), float(sys.argv[2])
     rc = RuntimeConfig()
-    agg = Aggregator(list(VENUE_SPECS), PegProvider(), bin_bps=rc.bin_bps,
-                     window_bps=rc.window_bps, staleness_s=rc.staleness_s)
-    snaps = []; nb = None
-    for u in _iter_updates(t0, t1):
-        if nb is None:
-            nb = u.ts
-        while nb < u.ts:
-            s = agg.snapshot(nb)
-            if s is not None:
-                snaps.append(s)
-            nb += rc.snapshot_interval_s
-        agg.apply(u)
-    if nb is not None:
-        s = agg.snapshot(nb)
-        if s is not None:
-            snaps.append(s)
+    # the shared replay: 120 s warm-up (complete books at t0), hour pruning, restart-aware
+    snaps = replay_snapshots(BASE, t0, t1, window_bps=rc.window_bps, bin_bps=rc.bin_bps,
+                             interval_s=rc.snapshot_interval_s, staleness_s=rc.staleness_s,
+                             exclude=EXCLUDE)
 
     mids = [s.mid for s in snaps]
     n = len(snaps)
