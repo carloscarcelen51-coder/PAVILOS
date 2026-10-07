@@ -52,9 +52,35 @@ can access. The fee wall (~10bps round-trip) dominates the ~17bps moves at this 
 only **larger/longer moves** (where fees are a small fraction) could change the arithmetic —
 which is exactly what the pressure-piloted ride bets on, and what the re-test must settle.
 
-## Known data caveat
+## Known data caveats
 The **ccxt connectors (gemini, kucoin, …) over-record**: they write the FULL book as a
 snapshot on every update (gemini ~670M rows/hour, kucoin ~231M, vs kraken ~1.5M deltas) — 95.7%
 of the lake. Analyses exclude `gemini`/`kucoin` from the replay to stay memory-bounded; the
-finding is robust to their exclusion. A connector fix (cap depth to ±window / diff to deltas)
-is the right long-term cleanup but does not affect the conclusions above.
+finding is robust to their exclusion. **Fixed by M17 (2026-10-06)** for data recorded from its
+deploy on: the recorder stores differences, losslessly (see the M17 spec).
+
+### Data quality, audited 2026-10-06 (read before picking re-test windows)
+- **Contaminated span — never analyse it:** 2026-09-28 15:46:31Z → 2026-09-29 16:24:03Z. The
+  lake itself filled D: (the recorder ran 14 days without a restart and the 7-day prune only
+  ran at startup): 47,297 failed writes across all 14 venues (~1 in 5 batches lost), and the
+  native venues' replayed books stay wrong until the restart that ended it. Listed in
+  `D:\pavilos_book_data\_gaps.json` together with every restart gap.
+- **Partial native books before M17:** kraken, binance, okx, bybit and bitstamp send a full
+  book only when they connect, so a window replayed from mid-session without a long warm-up
+  rebuilds their books from the window's deltas only (deep levels that never changed inside
+  the window are missing). From M17 on, a full checkpoint of every active venue is recorded
+  every 60 s and `replay_snapshots` warms up 120 s before `t0`.
+- **Mixed clock (before M17):** binance deltas carried the exchange's event time; every other
+  venue the PC's receive time. On 2026-10-06 the PC clock was ~323 ms behind binance and
+  Windows Time sync was not running, so pre-M17 binance is shifted against the other venues by
+  a few hundred ms (and the offset drifts). From M17 on, binance deltas carry the receive time
+  too, and the recorder never lets a venue's ts go backwards.
+- **Replay defaults changed with M17:** `replay_snapshots` now warms up 120 s before `t0`
+  (pass `warmup_s=0` to reproduce a pre-M17 run, which differs only where a recorder restart
+  marked in `_runs.jsonl` falls inside the window: the books are reset there), reads only the
+  hours it needs and skips unreadable files with a warning. The research
+  scripts (`_oos_window`, `_pressure_leads`, `_pressure_pilot`) use it instead of their own
+  readers.
+- **Self-check:** `python -m scripts.check_lake <data_dir> <t0> <t1>` verifies, for M17 data,
+  that the book rebuilt from the lake equals every recorded checkpoint (expected: 0 mismatches,
+  0 reordered; losses the recorder flagged show up as mismatches and in the `losses` column).
