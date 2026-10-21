@@ -10,6 +10,10 @@ from pathlib import Path
 
 from pavilos.execution.broker import Trade
 
+# Keys a log line may carry that this version doesn't know (written by a newer one)
+# are ignored rather than dropping the whole trade.
+_TRADE_FIELDS = frozenset(f.name for f in dataclasses.fields(Trade))
+
 
 def _reject_non_finite(_token: str):
     # json.loads accepts NaN/Infinity/-Infinity by default; reject them so a
@@ -36,7 +40,8 @@ class TradeLog:
             if not line:
                 continue
             try:
-                out.append(Trade(**json.loads(line, parse_constant=_reject_non_finite)))
+                d = json.loads(line, parse_constant=_reject_non_finite)
+                out.append(Trade(**{k: v for k, v in d.items() if k in _TRADE_FIELDS}))
             except Exception:
                 continue  # skip corrupt / partially-written / non-finite lines
         return out

@@ -226,16 +226,21 @@ class Runtime:
             janitor.stop()
         self.recorder.stop()
 
+    def web_app(self):
+        """Dashboard app: live state at / and the all-time trade history at /trades."""
+        from pavilos.web.server import create_app
+        return create_app(self.state, trades=lambda: self.all_trades,
+                          starting_equity=self.config.starting_equity)
+
     async def run_app(self, stop: "asyncio.Event | None" = None) -> None:
         import uvicorn
-        from pavilos.web.server import create_app
         stop = stop or asyncio.Event()
         asyncio.get_running_loop().set_exception_handler(_loop_exception_handler)
         janitor = self._start_recording() if self.recorder is not None else None
         await self.engine.start()
         # log_config=None: uvicorn logs through OUR handlers (logs/pavilos.log) instead of
         # installing its own stderr handlers, which would bypass the rotating file.
-        server = uvicorn.Server(uvicorn.Config(create_app(self.state), host=self.config.host,
+        server = uvicorn.Server(uvicorn.Config(self.web_app(), host=self.config.host,
                                                port=self.config.port, log_level="warning",
                                                log_config=None))
         trading = asyncio.create_task(self._supervise_trading(stop))

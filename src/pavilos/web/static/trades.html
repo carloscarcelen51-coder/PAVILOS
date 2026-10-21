@@ -1,0 +1,1607 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PAVILOS · historial de trades</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2307090c'/%3E%3Crect x='10' y='3' width='3' height='10' fill='%234fd6e0'/%3E%3Crect x='3' y='9' width='3' height='4' fill='%23e3a23c'/%3E%3C/svg%3E" />
+<style>
+  /* ─── PAVILOS · historial de trades · autocontenido: sin build ni CDN ─────── */
+  :root {
+    --bg:        #07090c;
+    --bg-panel:  #0b0f14;
+    --bg-raised: #10161d;
+    --rule:      #1a232d;
+    --rule-hot:  #26323e;
+    --ink:       #c7d4de;
+    --ink-dim:   #6c7d8a;
+    --ink-faint: #3f4d59;
+    --amber:     #e3a23c;
+    --amber-dim: #6b5226;
+    --bid:       #2fd07a;
+    --ask:       #ff5d5d;
+    --cyan:      #4fd6e0;
+    --cyan-dim:  #1e4750;
+    --head-h:    52px;
+    --side-w:    304px;
+    --mono: "JetBrains Mono","SF Mono","SFMono-Regular",ui-monospace,
+            "Cascadia Mono","Cascadia Code","Roboto Mono","DejaVu Sans Mono",
+            "Liberation Mono",Consolas,"Courier New",monospace;
+  }
+
+  * { box-sizing:border-box; }
+  html { color-scheme:dark; }
+  body {
+    margin:0; min-height:100vh;
+    background:
+      radial-gradient(1200px 700px at 78% -8%, rgba(79,214,224,.05), transparent 60%),
+      radial-gradient(900px 600px at 8% 108%, rgba(227,162,60,.045), transparent 60%),
+      var(--bg);
+    background-attachment:fixed;
+    color:var(--ink); font-family:var(--mono); font-size:12.5px; line-height:1.4; letter-spacing:.2px;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  }
+  body::after {
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:90;
+    background:repeating-linear-gradient(to bottom, rgba(255,255,255,.012) 0 1px, transparent 1px 3px);
+    mix-blend-mode:overlay; opacity:.5;
+  }
+  .num { font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1,"zero" 1; }
+  .up { color:var(--bid); } .down { color:var(--ask); }
+  .dim { color:var(--ink-dim); } .faint { color:var(--ink-faint); }
+  ::-webkit-scrollbar { width:9px; height:9px; }
+  ::-webkit-scrollbar-thumb { background:var(--rule-hot); }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background:transparent; }
+
+  /* ─── controles ──────────────────────────────────────────────────────────── */
+  select, input, button { font:inherit; color:var(--ink); }
+  select, input[type=text], input[type=datetime-local] {
+    background:var(--bg-raised); border:1px solid var(--rule-hot); border-radius:0;
+    padding:5px 7px; font-size:12px; outline:none; min-width:0; width:100%;
+  }
+  select { cursor:pointer; }
+  select:focus, input:focus { border-color:var(--cyan-dim); box-shadow:0 0 0 1px rgba(79,214,224,.25); }
+  input.bad { border-color:var(--ask); box-shadow:0 0 0 1px rgba(255,93,93,.3); }
+  input::placeholder { color:var(--ink-faint); }
+  input[type=datetime-local]::-webkit-calendar-picker-indicator { filter:invert(.65); cursor:pointer; }
+  input[type=checkbox] { accent-color:var(--amber); margin:0; }
+  button {
+    background:var(--bg-raised); border:1px solid var(--rule-hot); border-radius:0;
+    padding:5px 10px; font-size:10.5px; letter-spacing:1.1px; text-transform:uppercase; cursor:pointer;
+  }
+  button:hover { border-color:var(--ink-faint); color:#fff; }
+  button:focus-visible { outline:1px solid var(--cyan); outline-offset:1px; }
+  .seg { display:inline-flex; width:100%; }
+  .seg button { flex:1; margin-left:-1px; padding:5px 6px; }
+  .seg button:first-child { margin-left:0; }
+  .seg button.on { background:rgba(79,214,224,.10); color:var(--cyan); border-color:var(--cyan-dim); position:relative; z-index:1; }
+  .lbl { font-size:9.5px; letter-spacing:2px; color:var(--ink-faint); text-transform:uppercase; white-space:nowrap; }
+
+  /* ─── cabecera ───────────────────────────────────────────────────────────── */
+  .top {
+    position:sticky; top:0; z-index:60; height:var(--head-h);
+    display:flex; align-items:stretch; border-bottom:1px solid var(--rule);
+    background:linear-gradient(180deg,#0c1117,#080b0f);
+  }
+  .brand { display:flex; align-items:center; padding:0 20px; border-right:1px solid var(--rule); }
+  .brand .mark {
+    display:inline-flex; align-items:center; font-weight:700; font-size:17px; letter-spacing:5px;
+    color:var(--ink); text-decoration:none; text-shadow:0 0 16px rgba(79,214,224,.18);
+  }
+  .brand .mark .caret {
+    width:8px; height:16px; margin-left:6px; background:var(--cyan);
+    box-shadow:0 0 10px rgba(79,214,224,.6); animation:caret 1.1s steps(1) infinite;
+  }
+  @keyframes caret { 0%,49% { opacity:1; } 50%,100% { opacity:0; } }
+  .tabs { display:flex; align-items:stretch; }
+  .tabs a {
+    display:flex; align-items:center; padding:0 18px; border-right:1px solid var(--rule);
+    font-size:10.5px; font-weight:600; letter-spacing:2.2px; text-transform:uppercase;
+    color:var(--ink-dim); text-decoration:none; border-bottom:2px solid transparent; white-space:nowrap;
+  }
+  .tabs a:hover { color:var(--ink); background:rgba(255,255,255,.02); }
+  .tabs a.on { color:var(--amber); border-bottom-color:var(--amber); background:linear-gradient(180deg,transparent,rgba(227,162,60,.07)); }
+  .hctl { margin-left:auto; display:flex; align-items:center; gap:10px; padding:0 16px; min-width:0; }
+  .hctl > * { flex:none; }
+  .hctl button { white-space:nowrap; }
+  .hctl select { width:auto; min-width:130px; max-width:220px; }
+  .hctl .seg { width:auto; }
+  .live-st { display:flex; align-items:center; gap:7px; font-size:10px; letter-spacing:1.3px; color:var(--ink-dim); text-transform:uppercase; white-space:nowrap; }
+  .live-st .pip { width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex:none; }
+  .live-st.on .pip { background:var(--bid); animation:pulse 2.1s ease-out infinite; }
+  .live-st.err { color:var(--amber); }
+  .live-st.err .pip { background:var(--amber); box-shadow:0 0 9px var(--amber); }
+  @keyframes pulse {
+    0%   { box-shadow:0 0 0 0 rgba(47,208,122,.45); }
+    70%  { box-shadow:0 0 0 7px rgba(47,208,122,0); }
+    100% { box-shadow:0 0 0 0 rgba(47,208,122,0); }
+  }
+  .paper {
+    font-size:10.5px; font-weight:700; letter-spacing:3px; color:var(--amber); text-transform:uppercase;
+    border:1px solid var(--amber-dim); padding:5px 11px; white-space:nowrap;
+    background:repeating-linear-gradient(45deg, rgba(227,162,60,.10) 0 7px, rgba(227,162,60,.03) 7px 14px);
+  }
+  .menu { position:relative; }
+  .menu .pop {
+    position:absolute; right:0; top:calc(100% + 5px); z-index:70; display:none; min-width:250px; padding:6px;
+    background:var(--bg-raised); border:1px solid var(--rule-hot); box-shadow:0 12px 34px rgba(0,0,0,.55);
+  }
+  .menu.open .pop { display:block; }
+  .pop button { display:block; width:100%; text-align:left; border:none; padding:7px 8px; text-transform:none; letter-spacing:.3px; font-size:11.5px; background:none; }
+  .pop button:hover { background:rgba(255,255,255,.045); }
+  .pop label { display:flex; gap:8px; align-items:center; padding:4px 6px; font-size:11.5px; cursor:pointer; white-space:nowrap; }
+  .pop label:hover { background:rgba(255,255,255,.03); }
+  .btn-filters { display:none; }
+
+  /* ─── estructura ─────────────────────────────────────────────────────────── */
+  .layout { display:grid; grid-template-columns:var(--side-w) minmax(0,1fr); align-items:start; }
+  .side {
+    position:sticky; top:var(--head-h); height:calc(100vh - var(--head-h)); overflow-y:auto;
+    border-right:1px solid var(--rule); background:rgba(11,15,20,.94);
+  }
+  .side-in { padding:4px 14px 48px; }
+  .count-box { margin:12px 0 4px; padding:11px 12px 10px; border:1px solid var(--rule); background:var(--bg-raised); position:relative; overflow:hidden; }
+  .count-box::before { content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--amber); box-shadow:0 0 12px rgba(227,162,60,.5); }
+  .count-box .big { font-size:22px; font-weight:700; margin-top:3px; }
+  .count-box .big .of { font-size:12px; font-weight:400; color:var(--ink-dim); }
+  .flash { animation:flash 1.4s ease-out; }
+  @keyframes flash { from { background:rgba(79,214,224,.20); } to { background:var(--bg-raised); } }
+  .fg { padding:12px 0 13px; border-bottom:1px dashed var(--rule); }
+  .fg:last-of-type { border-bottom:none; }
+  .fg h3 {
+    margin:0 0 9px; display:flex; justify-content:space-between; align-items:baseline;
+    font-size:9.5px; font-weight:600; letter-spacing:2.2px; color:var(--ink-dim); text-transform:uppercase;
+  }
+  .fg h3 .x { cursor:pointer; color:var(--ink-faint); letter-spacing:1px; font-weight:400; }
+  .fg h3 .x:hover { color:var(--amber); }
+  .chips { display:flex; flex-wrap:wrap; gap:4px; }
+  .chips button { padding:4px 7px; font-size:10px; letter-spacing:.6px; text-transform:none; }
+  .chips button.on { color:var(--amber); border-color:var(--amber-dim); background:rgba(227,162,60,.09); }
+  .frow { display:grid; grid-template-columns:66px minmax(0,1fr); align-items:center; gap:6px; margin-top:7px; }
+  .frow > span { font-size:10px; color:var(--ink-dim); letter-spacing:.5px; }
+  .rng { display:grid; grid-template-columns:minmax(0,1fr) 12px minmax(0,1fr); align-items:center; gap:3px; }
+  .rng i { text-align:center; color:var(--ink-faint); font-style:normal; }
+  .rbox { margin-top:8px; }
+  .rbox .rl { display:flex; justify-content:space-between; font-size:10px; color:var(--ink-dim); letter-spacing:.4px; margin-bottom:3px; }
+  .rbox .rl em { font-style:normal; color:var(--ink-faint); }
+  .checks label { display:flex; align-items:center; gap:8px; padding:3px 0; cursor:pointer; font-size:11.5px; }
+  .checks .cnt { margin-left:auto; color:var(--ink-faint); font-size:10.5px; }
+  .wd { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
+  .wd button { padding:5px 0; letter-spacing:0; }
+  .wd button.on { color:var(--amber); border-color:var(--amber-dim); background:rgba(227,162,60,.09); }
+  .hint { font-size:10px; color:var(--ink-faint); line-height:1.55; margin-top:7px; letter-spacing:.2px; }
+  .side-foot { padding-top:12px; }
+  .side-foot button { width:100%; padding:8px; }
+
+  main { min-width:0; padding:14px 18px 80px; display:flex; flex-direction:column; gap:14px; }
+
+  .acct {
+    display:flex; flex-wrap:wrap; align-items:center; gap:6px 20px; padding:9px 14px;
+    border:1px solid var(--rule); background:linear-gradient(90deg, rgba(79,214,224,.055), transparent 65%);
+    font-size:11.5px;
+  }
+  .acct .tag { font-size:9.5px; letter-spacing:2.2px; color:var(--cyan); text-transform:uppercase; }
+  .acct .k { color:var(--ink-faint); font-size:9.5px; letter-spacing:1.6px; text-transform:uppercase; margin-right:6px; }
+  .acct .note { margin-left:auto; color:var(--ink-faint); font-size:10px; letter-spacing:.4px; }
+  .active-chips { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .active-chips:empty { display:none; }
+  .fchip {
+    display:inline-flex; align-items:center; gap:4px; padding:2px 2px 2px 9px;
+    border:1px solid var(--amber-dim); background:rgba(227,162,60,.07); color:var(--amber); font-size:10.5px;
+  }
+  .fchip button { border:none; background:none; color:var(--amber); padding:1px 7px; font-size:13px; line-height:1; letter-spacing:0; }
+  .fchip button:hover { color:#fff; }
+  .warn-chip { color:var(--ask); border-color:#5a2525; background:rgba(255,93,93,.07); padding:3px 9px; }
+
+  /* ─── KPIs ───────────────────────────────────────────────────────────────── */
+  .kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); }
+  .kpi { position:relative; padding:13px 14px 11px; background:var(--bg-raised); min-height:86px; min-width:0; }
+  .kpi::before { content:""; position:absolute; left:0; right:0; top:0; height:2px; background:var(--rule-hot); }
+  .kpi.up::before { background:linear-gradient(90deg,var(--bid),transparent 85%); }
+  .kpi.down::before { background:linear-gradient(90deg,var(--ask),transparent 85%); }
+  .kpi .k { font-size:9.5px; letter-spacing:2px; color:var(--ink-faint); text-transform:uppercase; }
+  .kpi .v { margin-top:6px; font-size:21px; font-weight:700; letter-spacing:.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .kpi .s { margin-top:4px; font-size:10.5px; color:var(--ink-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* ─── paneles ────────────────────────────────────────────────────────────── */
+  .panel { border:1px solid var(--rule); background:var(--bg-panel); min-width:0; }
+  .ph { display:flex; align-items:center; gap:10px; padding:7px 14px; border-bottom:1px solid var(--rule); min-height:38px; flex-wrap:wrap; }
+  .ph .t { font-size:10.5px; font-weight:600; letter-spacing:2.4px; text-transform:uppercase; }
+  .ph .sub { font-size:9.5px; letter-spacing:1px; color:var(--ink-faint); text-transform:uppercase; }
+  .ph .sp { flex:1; }
+  .ph select { width:auto; font-size:10.5px; padding:3px 6px; }
+  .ph button { font-size:10px; padding:4px 8px; }
+  .grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+  .chart { position:relative; height:210px; }
+  .chart.tall { height:340px; }
+  .chart canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+
+  .edge { padding:13px 16px 15px; display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,1fr); gap:22px; align-items:center; }
+  .ebar { display:grid; grid-template-columns:118px minmax(0,1fr) 96px; align-items:center; gap:10px; margin:6px 0; font-size:11px; }
+  .ebar .track { height:13px; background:rgba(255,255,255,.035); position:relative; }
+  .ebar .track i { position:absolute; top:0; bottom:0; left:0; box-shadow:0 0 10px rgba(0,0,0,.2); }
+  .ebar .val { text-align:right; font-weight:600; }
+  .edge p { margin:0; color:var(--ink-dim); font-size:11.5px; line-height:1.7; }
+  .edge p b { color:var(--ink); font-weight:600; }
+  .edge p b.up { color:var(--bid); } .edge p b.down { color:var(--ask); }
+
+  .mgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(318px,1fr)); }
+  .mg { padding:11px 15px 13px; border-right:1px solid var(--rule); border-bottom:1px solid var(--rule); min-width:0; }
+  .mg h4 { margin:1px 0 9px; font-size:9.5px; letter-spacing:2.2px; color:var(--amber); text-transform:uppercase; font-weight:600; }
+  .kv { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 12px; align-items:baseline; margin:0; }
+  .kv dt { color:var(--ink-dim); font-size:11px; cursor:help; min-width:0; }
+  .kv dt:hover { color:var(--ink); }
+  .kv dd { margin:0; text-align:right; font-size:12px; font-weight:500; white-space:nowrap; }
+  .kv dd a { color:var(--cyan); text-decoration:none; cursor:pointer; border-bottom:1px dotted var(--cyan-dim); }
+  .kv dd a:hover { color:#fff; }
+  .kv dd .na { color:var(--ink-faint); font-weight:400; font-size:10.5px; }
+  table.ls { width:100%; border-collapse:collapse; font-size:11.5px; }
+  table.ls th { text-align:right; font-size:9px; letter-spacing:1.3px; color:var(--ink-faint); text-transform:uppercase; font-weight:500; padding:3px 0 5px 8px; border-bottom:1px solid var(--rule); }
+  table.ls td { text-align:right; padding:5px 0 4px 8px; border-bottom:1px solid rgba(255,255,255,.025); white-space:nowrap; }
+  table.ls th:first-child, table.ls td:first-child { text-align:left; padding-left:0; }
+  .side-tag { font-weight:700; letter-spacing:1px; font-size:10.5px; }
+  .side-tag.LONG { color:var(--bid); } .side-tag.SHORT { color:var(--ask); }
+
+  .bk-tabs { display:flex; flex-wrap:wrap; border-bottom:1px solid var(--rule); }
+  .bk-tabs button { border:none; border-right:1px solid var(--rule); background:none; padding:9px 13px; font-size:10px; letter-spacing:1.5px; color:var(--ink-dim); }
+  .bk-tabs button:hover { color:var(--ink); background:rgba(255,255,255,.02); }
+  .bk-tabs button.on { color:var(--amber); box-shadow:inset 0 -2px 0 var(--amber); background:rgba(227,162,60,.05); }
+  .bk-wrap { max-height:440px; overflow:auto; }
+  table.bk { width:100%; border-collapse:collapse; font-size:11.5px; }
+  table.bk th {
+    position:sticky; top:0; z-index:1; background:var(--bg-panel); text-align:right; padding:8px 10px 7px;
+    font-size:9.5px; letter-spacing:1.2px; color:var(--ink-faint); text-transform:uppercase; font-weight:500;
+    border-bottom:1px solid var(--rule-hot); cursor:pointer; white-space:nowrap; user-select:none;
+  }
+  table.bk th:hover { color:var(--ink); }
+  table.bk th.sorted { color:var(--amber); }
+  table.bk th:first-child, table.bk td:first-child { text-align:left; }
+  table.bk td { padding:5px 10px; text-align:right; border-bottom:1px solid rgba(255,255,255,.025); white-space:nowrap; }
+  table.bk tbody tr { cursor:pointer; }
+  table.bk tbody tr:hover { background:rgba(79,214,224,.05); }
+  table.bk tfoot td { position:sticky; bottom:0; background:var(--bg-raised); border-top:1px solid var(--rule-hot); font-weight:600; }
+
+  /* ─── tabla de trades (virtual: solo se pintan las filas visibles) ──────── */
+  .tbl-wrap { position:relative; height:68vh; min-height:340px; overflow:auto; }
+  .thead {
+    position:sticky; top:0; z-index:3; display:grid; grid-template-columns:var(--cols);
+    width:max-content; min-width:100%; background:var(--bg-panel); border-bottom:1px solid var(--rule-hot);
+  }
+  .th { padding:8px 8px 7px; font-size:9.5px; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink-faint); cursor:pointer; white-space:nowrap; user-select:none; overflow:hidden; text-overflow:ellipsis; }
+  .th.r { text-align:right; }
+  .th:hover { color:var(--ink); }
+  .th.sorted { color:var(--amber); }
+  .tbody { position:relative; width:max-content; min-width:100%; }
+  .tr {
+    position:absolute; left:0; display:grid; grid-template-columns:var(--cols); width:max-content; min-width:100%;
+    height:24px; align-items:center; border-bottom:1px solid rgba(255,255,255,.022); font-size:11.5px; cursor:pointer;
+  }
+  .tr.odd { background:rgba(255,255,255,.012); }
+  .tr:hover { background:rgba(79,214,224,.055); }
+  .tr.sel { background:rgba(227,162,60,.13); box-shadow:inset 3px 0 0 var(--amber); }
+  .td { padding:0 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .td.r { text-align:right; }
+  .td.idc { color:var(--ink-dim); }
+  .rsn { font-size:9.5px; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink-dim); }
+  .rsn.stop { color:var(--amber); } .rsn.close { color:var(--cyan); }
+  .tfoot { display:flex; flex-wrap:wrap; gap:4px 20px; padding:8px 14px; border-top:1px solid var(--rule); font-size:11px; color:var(--ink-dim); }
+  .tfoot b { color:var(--ink); font-weight:600; }
+  .panel.full { position:fixed; left:0; right:0; top:var(--head-h); bottom:0; z-index:55; display:flex; flex-direction:column; }
+  .panel.full .tbl-wrap { height:auto; flex:1; }
+  .empty { padding:42px 16px; text-align:center; color:var(--ink-faint); font-size:11px; letter-spacing:1.5px; text-transform:uppercase; }
+
+  .tip {
+    position:fixed; z-index:95; pointer-events:none; display:none; padding:8px 11px;
+    background:rgba(12,17,23,.97); border:1px solid var(--rule-hot); box-shadow:0 10px 28px rgba(0,0,0,.55);
+    font-size:11px; line-height:1.6; white-space:nowrap;
+  }
+  .tip .h { color:var(--amber); font-size:9.5px; letter-spacing:1.5px; text-transform:uppercase; }
+  .toast {
+    position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:96; display:none;
+    padding:9px 16px; background:var(--bg-raised); border:1px solid var(--amber-dim); color:var(--amber);
+    font-size:11.5px; box-shadow:0 10px 28px rgba(0,0,0,.5);
+  }
+  .toast.on { display:block; }
+  .loading {
+    position:fixed; left:0; right:0; bottom:0; top:var(--head-h); z-index:58; display:flex; flex-direction:column; gap:10px;
+    align-items:center; justify-content:center; background:rgba(7,9,12,.88);
+    font-size:12px; letter-spacing:3px; text-transform:uppercase; color:var(--ink-dim);
+  }
+  .loading.off { display:none; }
+  .loading .err { color:var(--amber); letter-spacing:1px; text-transform:none; font-size:11.5px; }
+  .loading .cur { display:inline-block; width:9px; height:15px; background:var(--cyan); margin-left:6px; vertical-align:-2px; animation:caret 1.1s steps(1) infinite; }
+
+  @media (max-width:1180px) {
+    .layout { grid-template-columns:minmax(0,1fr); }
+    .side {
+      position:fixed; left:0; top:var(--head-h); bottom:0; width:min(340px,92vw); height:auto; z-index:57;
+      background:var(--bg-panel);
+      transform:translateX(-103%); transition:transform .18s ease; box-shadow:12px 0 34px rgba(0,0,0,.55);
+    }
+    body.show-filters .side { transform:none; }
+    .btn-filters { display:inline-block; }
+    .tabs a { padding:0 12px; letter-spacing:1.5px; }
+  }
+  @media (max-width:980px) {
+    .grid2, .edge { grid-template-columns:minmax(0,1fr); }
+    .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .hctl .lbl, .live-st .t, .paper { display:none; }
+  }
+  @media (max-width:720px) {
+    :root { --head-h:92px; }
+    .top { flex-wrap:wrap; }
+    .brand, .tabs { height:46px; }
+    .brand { padding:0 12px; }
+    .brand .mark { font-size:13px; letter-spacing:3px; }
+    .tabs { flex:1; }
+    .tabs a { flex:1; justify-content:center; font-size:9.5px; padding:0 6px; letter-spacing:1px; }
+    .tabs a:last-child { border-right:none; }
+    .hctl { width:100%; height:46px; margin-left:0; border-top:1px solid var(--rule); overflow-x:auto; gap:6px; padding:0 8px; }
+    main { padding:10px 8px 60px; }
+    .acct .note { margin-left:0; }
+  }
+  @media (max-width:560px) {
+    .kpi { padding:11px 11px 10px; min-height:76px; }
+    .kpi .v { font-size:16px; }
+    .ebar { grid-template-columns:92px minmax(0,1fr) 80px; }
+  }
+</style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><a class="mark" href="/" title="Volver al panel en vivo">PAVILOS<span class="caret"></span></a></div>
+    <nav class="tabs">
+      <a href="/">Panel en vivo</a>
+      <a href="/trades" class="on" aria-current="page">Trades históricos</a>
+    </nav>
+    <div class="hctl">
+      <button class="btn-filters" id="btn-filters" type="button">Filtros</button>
+      <span class="lbl">Par</span>
+      <select id="f-sym" title="Par"></select>
+      <span class="lbl">Hora</span>
+      <div class="seg" id="f-tz">
+        <button type="button" data-v="local" id="tz-local">Local</button>
+        <button type="button" data-v="utc" title="Tiempo universal coordinado">UTC</button>
+      </div>
+      <div class="live-st" id="live-st"><span class="pip"></span><span class="t" id="live-t">conectando…</span></div>
+      <button type="button" id="btn-live" title="Pausar o reanudar la actualización automática (cada 5 s)">Pausar</button>
+      <div class="menu" id="menu-csv">
+        <button type="button" data-toggle="menu-csv">Exportar CSV ▾</button>
+        <div class="pop">
+          <button type="button" data-csv="es">Excel en español  · separador ; y coma decimal</button>
+          <button type="button" data-csv="std">Estándar  · separador , y punto decimal</button>
+          <div class="hint" style="padding:4px 8px 2px">Exporta los trades del filtro, en el orden de la tabla y con la hora de la zona elegida.</div>
+        </div>
+      </div>
+      <span class="paper">Paper</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="side" id="side"><div class="side-in">
+      <div class="count-box" id="count-box">
+        <div class="lbl">Trades en el filtro</div>
+        <div class="big num" id="cnt">—</div>
+        <div class="hint" id="cnt-sub" style="margin-top:3px"></div>
+      </div>
+
+      <div class="fg">
+        <h3>Periodo <span class="x" data-clear="period">limpiar</span></h3>
+        <div class="chips" id="f-presets"></div>
+        <div class="frow"><span>Desde</span><input type="datetime-local" id="f-from" /></div>
+        <div class="frow"><span>Hasta</span><input type="datetime-local" id="f-to" /></div>
+        <div class="frow"><span>Fecha de</span>
+          <div class="seg" id="f-tf"><button type="button" data-v="exit">Salida</button><button type="button" data-v="entry">Entrada</button></div>
+        </div>
+        <div class="hint">Los atajos de días (7, 30, 90) son móviles: se recalculan con cada actualización.</div>
+      </div>
+
+      <div class="fg">
+        <h3>Operación <span class="x" data-clear="op">limpiar</span></h3>
+        <div class="frow"><span>Lado</span>
+          <div class="seg" id="f-side"><button type="button" data-v="ALL">Todos</button><button type="button" data-v="LONG">Long</button><button type="button" data-v="SHORT">Short</button></div>
+        </div>
+        <div class="frow"><span>Resultado</span>
+          <div class="seg" id="f-res"><button type="button" data-v="ALL">Todos</button><button type="button" data-v="win">Gan.</button><button type="button" data-v="loss">Pérd.</button><button type="button" data-v="flat">Cero</button></div>
+        </div>
+        <div class="rbox"><div class="rl"><span>Motivo de salida</span></div><div class="checks" id="f-reasons"></div></div>
+      </div>
+
+      <div class="fg">
+        <h3>Rangos <span class="x" data-clear="ranges">limpiar</span></h3>
+        <div id="f-ranges"></div>
+        <div class="hint">Mínimo y máximo incluidos; vacío = sin límite. Decimales con coma o con punto. Duración: 90, 90s, 1,5m, 2h, 250ms.</div>
+      </div>
+
+      <div class="fg">
+        <h3>Horario de entrada <span class="x" data-clear="clock">limpiar</span></h3>
+        <div class="frow"><span>Hora</span><div class="rng"><select id="f-hf"></select><i>–</i><select id="f-ht"></select></div></div>
+        <div class="rbox"><div class="rl"><span>Días de la semana</span></div><div class="wd" id="f-wd"></div></div>
+        <div class="hint">Si «desde» es mayor que «hasta», el tramo cruza la medianoche (p. ej. 22 – 03).</div>
+      </div>
+
+      <div class="fg">
+        <h3>Buscar</h3>
+        <input type="text" id="f-q" placeholder="#id exacto, motivo, lado, par…" autocomplete="off" />
+      </div>
+
+      <div class="fg">
+        <h3>Capital base</h3>
+        <div class="frow"><span>Capital €</span><input type="text" id="f-cap" inputmode="decimal" autocomplete="off" /></div>
+        <div class="hint">Punto de partida del balance, del ROI y del drawdown en %. Por defecto, el capital inicial del paper. Las métricas usan solo los trades del filtro, como si la cuenta solo hubiera hecho esos.</div>
+      </div>
+
+      <div class="side-foot"><button type="button" id="btn-reset">Limpiar todos los filtros</button></div>
+    </div></aside>
+
+    <main>
+      <div class="acct" id="acct"></div>
+      <div class="active-chips" id="chips"></div>
+      <div class="kpis" id="kpis"></div>
+
+      <section class="panel">
+        <div class="ph"><span class="t">Ventaja frente a coste</span><span class="sub">pb del nocional · ida y vuelta · ponderado por nocional</span></div>
+        <div class="edge" id="edge"></div>
+      </section>
+
+      <section class="panel">
+        <div class="ph"><span class="t">Balance y drawdown</span><span class="sub" id="eq-sub"></span><span class="sp"></span><span class="sub">clic en la curva: muestra el trade en la tabla</span></div>
+        <div class="chart tall"><canvas id="cv-eq"></canvas><canvas id="cv-eq-ov"></canvas></div>
+      </section>
+
+      <div class="grid2">
+        <section class="panel">
+          <div class="ph"><span class="t">P&amp;L por día</span><span class="sub" id="day-sub"></span><span class="sp"></span><span class="sub">clic: filtra ese día</span></div>
+          <div class="chart"><canvas id="cv-day"></canvas></div>
+        </section>
+        <section class="panel">
+          <div class="ph"><span class="t">P&amp;L por trade</span><span class="sub" id="hist-sub"></span><span class="sp"></span><span class="sub">clic: filtra ese tramo</span></div>
+          <div class="chart"><canvas id="cv-hist"></canvas></div>
+        </section>
+        <section class="panel">
+          <div class="ph"><span class="t">Por hora de entrada</span><span class="sp"></span><select id="m-hour" title="Qué se dibuja"></select></div>
+          <div class="chart"><canvas id="cv-hour"></canvas></div>
+        </section>
+        <section class="panel">
+          <div class="ph"><span class="t">Por día de la semana</span><span class="sp"></span><select id="m-wd" title="Qué se dibuja"></select></div>
+          <div class="chart"><canvas id="cv-wd"></canvas></div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="ph"><span class="t">Todas las métricas</span><span class="sub">pasa el ratón por un nombre para ver cómo se calcula</span></div>
+        <div class="mgrid" id="metrics"></div>
+      </section>
+
+      <section class="panel">
+        <div class="ph"><span class="t">Desglose</span><span class="sub" id="bk-sub"></span><span class="sp"></span><span class="sub">clic en una fila: filtra por ella · clic en una columna: ordena</span></div>
+        <div class="bk-tabs" id="bk-tabs"></div>
+        <div class="bk-wrap"><table class="bk num" id="bk"></table></div>
+      </section>
+
+      <section class="panel" id="panel-table">
+        <div class="ph">
+          <span class="t">Trades</span><span class="sub" id="tbl-sub"></span><span class="sp"></span>
+          <div class="menu" id="menu-cols"><button type="button" data-toggle="menu-cols">Columnas ▾</button><div class="pop" id="cols-pop"></div></div>
+          <button type="button" id="btn-full" title="Ver la tabla a pantalla completa (Esc para salir)">⤢ Ampliar</button>
+        </div>
+        <div class="tbl-wrap" id="tbl-wrap"><div class="thead" id="thead"></div><div class="tbody num" id="tbody"></div></div>
+        <div class="tfoot num" id="tfoot"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="tip" id="tip"></div>
+  <div class="toast" id="toast"></div>
+  <div class="loading" id="loading"><div>Cargando historial<span class="cur"></span></div><div class="err" id="load-err"></div></div>
+  <noscript><div class="empty">Esta página necesita JavaScript.</div></noscript>
+
+<script src="/static/trades_metrics.js"></script>
+<script>
+(() => {
+  "use strict";
+  const M = window.TradesMetrics;
+  const EM = "—", ROW_H = 24, POLL_MS = 5000;
+  const $ = (s, el) => (el || document).querySelector(s);
+  const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const sgn = (x) => (x > 0 ? "up" : x < 0 ? "down" : "");
+  const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const C = { ink: cssv("--ink"), dim: cssv("--ink-dim"), faint: cssv("--ink-faint"), rule: cssv("--rule"),
+              ruleHot: cssv("--rule-hot"), amber: cssv("--amber"), green: cssv("--bid"), red: cssv("--ask"),
+              cyan: cssv("--cyan"), mono: cssv("--mono") };
+  const LOCAL_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "local"; } catch (e) { return "local"; } })();
+  const MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  const WD_SHORT = ["L", "M", "X", "J", "V", "S", "D"];
+  const WD_LONG = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
+  const RES_LABEL = { win: "ganadoras", loss: "perdedoras", flat: "a cero" };
+  const PRESET_LABEL = { todo: "Todo", hoy: "Hoy", ayer: "Ayer", "7d": "7 días", "30d": "30 días", "90d": "90 días",
+                         semana: "Esta semana", mes: "Este mes", mes_pasado: "Mes pasado", ano: "Este año",
+                         ano_pasado: "Año pasado" };
+  const ROLLING = new Set(["hoy", "7d", "30d", "90d", "semana", "mes", "ano"]);
+
+  // ── formato ──────────────────────────────────────────────────────────────
+  const eur = (x, d, s) => M.fmtEur(x, d == null ? 2 : d, s);
+  const pct = (x, d, s) => M.fmtPct(x, d == null ? 2 : d, s);
+  const num = (x, d) => M.fmtNum(x, d == null ? 2 : d);
+  const int = (x) => M.fmtNum(x, 0);
+  const ratio = (x, d) => M.fmtRatio(x, d == null ? 2 : d);
+  const dur = (s) => M.fmtDuration(s);
+  const span = (cls, txt) => (cls ? `<span class="${cls}">${txt}</span>` : txt);
+  const sEur = (x, d) => span(sgn(x), eur(x, d, true));
+  const sNum = (x, d) => span(sgn(x), M.fmtSigned(x, d == null ? 2 : d));
+  const sPct = (x, d) => span(sgn(x), pct(x, d, true));
+  const fmtPrice = (x) => { if (x == null || !isFinite(x)) return EM; const a = Math.abs(x); return num(x, a >= 1000 ? 2 : a >= 1 ? 4 : 6); };
+  const fmtSize = (x) => { if (x == null || !isFinite(x)) return EM; const a = Math.abs(x); return num(x, a >= 100 ? 2 : a >= 1 ? 4 : 6); };
+  function compact(x) {
+    if (x == null || !isFinite(x)) return EM;
+    const a = Math.abs(x);
+    if (a >= 1e6) return num(x / 1e6, a >= 1e7 ? 0 : 1) + "M";
+    if (a >= 1e3) return num(x / 1e3, a >= 1e4 ? 0 : 1) + "k";
+    return num(x, a >= 100 || a === 0 ? 0 : a >= 10 ? 1 : 2);
+  }
+  const inputNum = (x) => (x == null ? "" : String(x).replace(".", ","));
+  const tzName = () => (F.tz === "utc" ? "UTC" : LOCAL_TZ);
+
+  // ── estado: filtros (se guardan en la URL) y datos ───────────────────────
+  const RANGES = [
+    { k: "pnl", l: "P&L neto", u: "€", f: ["pnlMin", "pnlMax"] },
+    { k: "ret", l: "Rentabilidad", u: "% del nocional", f: ["retMin", "retMax"] },
+    { k: "mov", l: "Movimiento a favor", u: "pb", f: ["moveMin", "moveMax"] },
+    { k: "dur", l: "Duración", u: "s", f: ["durMin", "durMax"], dur: true },
+    { k: "size", l: "Tamaño", u: "unid. base", f: ["sizeMin", "sizeMax"] },
+    { k: "not", l: "Nocional", u: "€", f: ["notionalMin", "notionalMax"] },
+    { k: "ent", l: "Precio de entrada", u: "", f: ["entryMin", "entryMax"] },
+    { k: "fee", l: "Comisión", u: "€", f: ["feeMin", "feeMax"] },
+  ];
+  const ALL_WD = [0, 1, 2, 3, 4, 5, 6];
+  const blankRanges = () => Object.fromEntries(RANGES.map((r) => [r.k, [null, null]]));
+  const defaults = () => ({ sym: "ALL", side: "ALL", res: "ALL", reasons: null, preset: "todo", from: null, to: null,
+                            tf: "exit", r: blankRanges(), hf: null, ht: null, wd: ALL_WD.slice(), q: "", tz: "local",
+                            cap: null });
+  let F = defaults();
+  const S = {
+    all: [], byId: new Map(), dropped: 0, boot: null, total: 0, startEquity: 10000,
+    symbols: [], reasons: [], filtered: [], view: [], m: null,
+    sel: null, sort: { key: "exit_ts", dir: "desc" }, bk: "day", bkSort: null,
+    live: true, lastOk: null, err: null, loaded: false, polling: false, lastApply: 0, applyMs: 0,
+    metric: { hour: "net", wd: "net" }, hover: { eq: -1, day: null, hist: null, hour: null, wd: null },
+    cols: null,
+  };
+
+  function writeHash() {
+    const p = new URLSearchParams();
+    if (F.sym !== "ALL") p.set("par", F.sym);
+    if (F.side !== "ALL") p.set("lado", F.side);
+    if (F.res !== "ALL") p.set("res", F.res);
+    if (F.reasons) p.set("motivo", F.reasons.join(",") || "-");
+    if (F.preset !== "todo") p.set("periodo", F.preset);
+    if (F.preset === "custom") { if (F.from != null) p.set("desde", F.from); if (F.to != null) p.set("hasta", F.to); }
+    if (F.tf !== "exit") p.set("fecha", F.tf);
+    for (const r of RANGES) {
+      const [a, b] = F.r[r.k];
+      if (a != null || b != null) p.set(r.k, (a == null ? "" : a) + "~" + (b == null ? "" : b));
+    }
+    if (F.hf != null) p.set("hdesde", F.hf);
+    if (F.ht != null) p.set("hhasta", F.ht);
+    if (F.wd.length !== 7) p.set("dias", F.wd.join(",") || "-");
+    if (F.q) p.set("q", F.q);
+    if (F.tz !== "local") p.set("zona", F.tz);
+    if (F.cap != null) p.set("capital", F.cap);
+    if (S.sort.key !== "exit_ts" || S.sort.dir !== "desc") p.set("orden", S.sort.key + ":" + S.sort.dir);
+    if (S.bk !== "day") p.set("desglose", S.bk);
+    const h = p.toString();
+    const url = location.pathname + location.search + (h ? "#" + h : "");
+    if (url !== location.pathname + location.search + location.hash) history.replaceState(null, "", url);
+  }
+  function readHash() {
+    const p = new URLSearchParams(location.hash.slice(1));
+    const f = defaults();
+    const nv = (s) => { if (s == null || s === "") return null; const x = Number(s); return Number.isFinite(x) ? x : null; };
+    if (p.get("par")) f.sym = p.get("par");
+    if (["LONG", "SHORT"].includes(p.get("lado"))) f.side = p.get("lado");
+    if (["win", "loss", "flat"].includes(p.get("res"))) f.res = p.get("res");
+    if (p.has("motivo")) f.reasons = p.get("motivo") === "-" ? [] : p.get("motivo").split(",").filter(Boolean);
+    const per = p.get("periodo");
+    if (per === "custom") { f.preset = "custom"; f.from = nv(p.get("desde")); f.to = nv(p.get("hasta")); if (f.from == null && f.to == null) f.preset = "todo"; }
+    else if (per && M.PRESETS.includes(per)) f.preset = per;
+    if (p.get("fecha") === "entry") f.tf = "entry";
+    for (const r of RANGES) {
+      const s = p.get(r.k);
+      if (s && s.includes("~")) { const [a, b] = s.split("~"); f.r[r.k] = [nv(a), nv(b)]; }
+    }
+    const hf = nv(p.get("hdesde")), ht = nv(p.get("hhasta"));
+    if (hf != null && hf >= 0 && hf <= 23) f.hf = Math.floor(hf);
+    if (ht != null && ht >= 0 && ht <= 23) f.ht = Math.floor(ht);
+    if (p.has("dias")) f.wd = p.get("dias") === "-" ? [] : p.get("dias").split(",").map(Number).filter((d) => d >= 0 && d <= 6);
+    if (p.get("q")) f.q = p.get("q");
+    if (p.get("zona") === "utc") f.tz = "utc";
+    const cap = nv(p.get("capital"));
+    if (cap != null && cap > 0) f.cap = cap;
+    const ord = (p.get("orden") || "").split(":");
+    S.sort = ord.length === 2 && COLS.some((c) => c.k === ord[0]) && (ord[1] === "asc" || ord[1] === "desc")
+      ? { key: ord[0], dir: ord[1] } : { key: "exit_ts", dir: "desc" };
+    S.bk = BK.some((b) => b.k === p.get("desglose")) ? p.get("desglose") : "day";
+    S.bkSort = null;
+    F = f;
+  }
+
+  function currentBounds() {
+    if (F.preset === "custom") return { from: F.from, to: F.to };
+    return M.periodBounds(F.preset, Date.now() / 1000, F.tz);
+  }
+  function baseCapital() { return F.cap != null ? F.cap : S.startEquity; }
+  function filterSpec() {
+    const b = currentBounds();
+    const spec = { symbol: F.sym, side: F.side, result: F.res, reasons: F.reasons, from: b.from, to: b.to,
+                   timeField: F.tf, hourFrom: F.hf, hourTo: F.ht, weekdays: F.wd.length === 7 ? null : F.wd,
+                   tz: F.tz, text: F.q };
+    for (const r of RANGES) { spec[r.f[0]] = F.r[r.k][0]; spec[r.f[1]] = F.r[r.k][1]; }
+    return spec;
+  }
+
+  // ── tabla: definición de columnas ────────────────────────────────────────
+  const COLS = [
+    { k: "id", l: "#", w: 70, r: true, cls: "idc", f: (t) => "#" + t.id, t: "Número de trade (orden en el log)" },
+    { k: "symbol", l: "Par", w: 80, f: (t) => esc(t.symbol) },
+    { k: "side", l: "Lado", w: 62, f: (t) => `<span class="side-tag ${esc(t.side)}">${esc(t.side)}</span>` },
+    { k: "entry_ts", l: "Entrada", w: 156, f: (t) => M.fmtDate(t.entry_ts, F.tz, true), t: "Hora de entrada" },
+    { k: "exit_ts", l: "Salida", w: 156, f: (t) => M.fmtDate(t.exit_ts, F.tz, true), t: "Hora de salida" },
+    { k: "duration", l: "Duración", w: 96, r: true, f: (t) => dur(t.duration) },
+    { k: "entry", l: "P. entrada", w: 100, r: true, f: (t) => fmtPrice(t.entry) },
+    { k: "exit", l: "P. salida", w: 100, r: true, f: (t) => fmtPrice(t.exit) },
+    { k: "move_bps", l: "Mov. pb", w: 80, r: true, f: (t) => sNum(t.move_bps, 2), t: "Movimiento del precio a favor del lado, en puntos básicos" },
+    { k: "size", l: "Tamaño", w: 96, r: true, f: (t) => fmtSize(t.size) },
+    { k: "notional", l: "Nocional €", w: 104, r: true, f: (t) => num(t.notional, 2), t: "Precio de entrada × tamaño" },
+    { k: "gross", l: "Bruto €", w: 96, r: true, f: (t) => sNum(t.gross, 2), t: "P&L antes de comisiones" },
+    { k: "fee", l: "Comisión €", w: 96, r: true, f: (t) => num(t.fee, 2), t: "Comisión de entrada + salida" },
+    { k: "pnl", l: "Neto €", w: 100, r: true, f: (t) => `<b>${sNum(t.pnl, 2)}</b>`, t: "P&L neto de comisiones" },
+    { k: "return_pct", l: "Rent. %", w: 90, r: true, f: (t) => sNum(t.return_pct, 4), t: "P&L neto / nocional" },
+    { k: "_cum", l: "Acumulado €", w: 118, r: true, f: (t) => sNum(t._cum, 2), t: "P&L neto acumulado del filtro, en orden de salida" },
+    { k: "_bal", l: "Balance €", w: 118, r: true, f: (t) => num(t._bal, 2), t: "Capital base + P&L acumulado del filtro" },
+    { k: "reason", l: "Motivo", w: 72, f: (t) => `<span class="rsn ${esc(t.reason)}">${esc(t.reason || EM)}</span>` },
+  ];
+  const TEXT_COLS = new Set(["symbol", "side", "reason"]);
+  function loadCols() {
+    try { const v = JSON.parse(localStorage.getItem("pavilos.trades.cols") || "null"); if (Array.isArray(v)) return new Set(v); } catch (e) { /* sin almacenamiento */ }
+    return new Set(COLS.map((c) => c.k));
+  }
+  function saveCols() { try { localStorage.setItem("pavilos.trades.cols", JSON.stringify(Array.from(S.cols))); } catch (e) { /* nada */ } }
+  const visibleCols = () => COLS.filter((c) => S.cols.has(c.k));
+
+  // ── desglose: pestañas y columnas ────────────────────────────────────────
+  const BK = [
+    { k: "day", l: "Día", period: "day" }, { k: "week", l: "Semana", period: "week" },
+    { k: "month", l: "Mes", period: "month" }, { k: "year", l: "Año", period: "year" },
+    { k: "reason", l: "Motivo" }, { k: "side", l: "Lado" }, { k: "symbol", l: "Par" },
+    { k: "hour", l: "Hora" }, { k: "wd", l: "Día de la semana" }, { k: "dur", l: "Duración" },
+  ];
+  const BK_COLS = [
+    { k: "sortKey", l: "Grupo", f: (g) => g.label },
+    { k: "n", l: "Trades", f: (g) => int(g.n) },
+    { k: "wins", l: "Gan.", f: (g) => int(g.wins) },
+    { k: "win_rate", l: "WR", f: (g) => pct(g.win_rate, 1) },
+    { k: "net", l: "Neto €", f: (g) => sNum(g.net, 2) },
+    { k: "gross", l: "Bruto €", f: (g) => sNum(g.gross, 2) },
+    { k: "fees", l: "Comisiones €", f: (g) => num(g.fees, 2) },
+    { k: "profit_factor", l: "PF", f: (g) => ratio(g.profit_factor) },
+    { k: "avg", l: "Media €", f: (g) => sNum(g.avg, 2) },
+    { k: "net_bps", l: "Neto pb", f: (g) => sNum(g.net_bps, 2) },
+    { k: "avg_duration", l: "Dur. media", f: (g) => dur(g.avg_duration) },
+    { k: "roi_pct", l: "ROI", f: (g) => sPct(g.roi_pct, 2), period: true },
+    { k: "bal_end", l: "Balance fin €", f: (g) => num(g.bal_end, 2), period: true },
+    { k: "max_dd", l: "DD dentro €", f: (g) => (g.max_dd > 0 ? span("down", num(-g.max_dd, 2)) : num(0, 2)), period: true },
+  ];
+
+  // ── utilidades de interfaz ───────────────────────────────────────────────
+  const tip = $("#tip");
+  function showTip(e, html) {
+    tip.innerHTML = html; tip.style.display = "block";
+    const pad = 14, r = tip.getBoundingClientRect();
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + r.width > innerWidth - 6) x = e.clientX - r.width - pad;
+    if (y + r.height > innerHeight - 6) y = e.clientY - r.height - pad;
+    tip.style.left = Math.max(4, x) + "px"; tip.style.top = Math.max(4, y) + "px";
+  }
+  const hideTip = () => { tip.style.display = "none"; };
+  let toastTimer = 0;
+  function toast(msg) {
+    const el = $("#toast"); el.textContent = msg; el.classList.add("on");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("on"), 2800);
+  }
+  function debounce(fn, ms) { let h = 0; return (...a) => { clearTimeout(h); h = setTimeout(() => fn(...a), ms); }; }
+  function dayLabel(key) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+    if (!m) return key;
+    const wd = (new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay() + 6) % 7;
+    return `${m[3]}/${m[2]}/${m[1]} ${WD_SHORT[wd]}`;
+  }
+  function periodLabel(period, key) {
+    if (period === "day") return dayLabel(key);
+    if (period === "week") {
+      const m = /^(\d{4})-W(\d{2})$/.exec(key);
+      if (!m) return key;
+      const mon = M.isoWeekMonday(+m[1], +m[2]);
+      return `S${m[2]} · ${String(mon.d).padStart(2, "0")}/${String(mon.m + 1).padStart(2, "0")}/${mon.y}`;
+    }
+    if (period === "month") { const m = /^(\d{4})-(\d{2})$/.exec(key); return m ? `${MONTHS[+m[2] - 1]} ${m[1]}` : key; }
+    return key;
+  }
+
+  // ── controles de la barra lateral ────────────────────────────────────────
+  function buildStaticControls() {
+    $("#f-presets").innerHTML = M.PRESETS.map((p) => `<button type="button" data-v="${p}">${PRESET_LABEL[p]}</button>`).join("");
+    $("#f-ranges").innerHTML = RANGES.map((r) => `
+      <div class="rbox"><div class="rl"><span>${esc(r.l)}</span><em>${esc(r.u)}</em></div>
+        <div class="rng"><input type="text" inputmode="decimal" data-r="${r.k}" data-i="0" placeholder="mín" autocomplete="off" />
+        <i>–</i><input type="text" inputmode="decimal" data-r="${r.k}" data-i="1" placeholder="máx" autocomplete="off" /></div></div>`).join("");
+    const hours = `<option value="">—</option>` + Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")} h</option>`).join("");
+    $("#f-hf").innerHTML = hours; $("#f-ht").innerHTML = hours;
+    $("#f-wd").innerHTML = WD_SHORT.map((d, i) => `<button type="button" data-v="${i}" title="${WD_LONG[i]}">${d}</button>`).join("");
+    const opts = (sel) => sel.innerHTML = Object.entries(BAR_METRICS).map(([k, m]) => `<option value="${k}">${m.l}</option>`).join("");
+    opts($("#m-hour")); opts($("#m-wd"));
+    $("#bk-tabs").innerHTML = BK.map((b) => `<button type="button" data-v="${b.k}">${b.l}</button>`).join("");
+    $("#tz-local").title = "Hora local del navegador: " + LOCAL_TZ;
+  }
+  function buildDataControls() {
+    const counts = new Map(), rcounts = new Map();
+    for (const t of S.all) {
+      counts.set(t.symbol, (counts.get(t.symbol) || 0) + 1);
+      rcounts.set(t.reason, (rcounts.get(t.reason) || 0) + 1);
+    }
+    S.symbols = Array.from(counts.keys()).sort();
+    S.reasons = Array.from(rcounts.keys()).sort();
+    const syms = S.symbols.slice();
+    if (F.sym !== "ALL" && !syms.includes(F.sym)) syms.push(F.sym);        // el de la URL, aunque hoy no tenga trades
+    $("#f-sym").innerHTML = `<option value="ALL">Todos los pares (${int(S.all.length)})</option>` +
+      syms.map((s) => `<option value="${esc(s)}">${esc(s)} (${int(counts.get(s) || 0)})</option>`).join("");
+    const reasons = S.reasons.slice();
+    for (const r of F.reasons || []) if (!reasons.includes(r)) reasons.push(r);
+    $("#f-reasons").innerHTML = reasons.map((r) => `<label><input type="checkbox" value="${esc(r)}" />` +
+      `<span class="rsn ${esc(r)}">${esc(r || "(sin motivo)")}</span><span class="cnt">${int(rcounts.get(r) || 0)}</span></label>`).join("") ||
+      `<div class="hint">Sin trades todavía.</div>`;
+  }
+  function syncSeg(id, v) { $$(`#${id} button`).forEach((b) => b.classList.toggle("on", b.dataset.v === v)); }
+  function syncInputs() {
+    $("#f-sym").value = F.sym;
+    syncSeg("f-tz", F.tz); syncSeg("f-tf", F.tf); syncSeg("f-side", F.side); syncSeg("f-res", F.res);
+    $$("#f-presets button").forEach((b) => b.classList.toggle("on", b.dataset.v === F.preset));
+    const b = currentBounds();
+    $("#f-from").value = M.toDateInput(b.from, F.tz);
+    $("#f-to").value = M.toDateInput(b.to, F.tz);
+    $$("#f-reasons input").forEach((c) => { c.checked = !F.reasons || F.reasons.includes(c.value); });
+    $$("#f-ranges input").forEach((inp) => {
+      if (document.activeElement === inp) return;
+      inp.value = inputNum(F.r[inp.dataset.r][+inp.dataset.i]); inp.classList.remove("bad");
+    });
+    $("#f-hf").value = F.hf == null ? "" : String(F.hf);
+    $("#f-ht").value = F.ht == null ? "" : String(F.ht);
+    $$("#f-wd button").forEach((x) => x.classList.toggle("on", F.wd.includes(+x.dataset.v)));
+    if (document.activeElement !== $("#f-q")) $("#f-q").value = F.q;
+    if (document.activeElement !== $("#f-cap")) { $("#f-cap").value = inputNum(F.cap); $("#f-cap").classList.remove("bad"); }
+    $("#f-cap").placeholder = inputNum(S.startEquity) + " (inicial)";
+    $("#m-hour").value = S.metric.hour; $("#m-wd").value = S.metric.wd;
+    $$("#bk-tabs button").forEach((x) => x.classList.toggle("on", x.dataset.v === S.bk));
+  }
+  function change(fn) { fn(); syncInputs(); apply(); }
+
+  function bindControls() {
+    $("#f-sym").addEventListener("change", (e) => change(() => { F.sym = e.target.value; }));
+    const seg = (id, set) => $("#" + id).addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-v]"); if (b) change(() => set(b.dataset.v));
+    });
+    seg("f-tz", (v) => { F.tz = v; });
+    seg("f-tf", (v) => { F.tf = v; });
+    seg("f-side", (v) => { F.side = v; });
+    seg("f-res", (v) => { F.res = v; });
+    seg("f-presets", (v) => { F.preset = v; F.from = F.to = null; });
+    const dateChange = (which) => () => change(() => {
+      const b = currentBounds();
+      const v = $(which === "from" ? "#f-from" : "#f-to").value;
+      const ts = v ? M.parseDateInput(v, F.tz) : null;
+      F.preset = "custom"; F.from = b.from; F.to = b.to;
+      if (which === "from") F.from = ts; else F.to = ts == null ? null : ts + 59.999;   // incluye ese minuto
+      if (F.from == null && F.to == null) F.preset = "todo";
+    });
+    $("#f-from").addEventListener("change", dateChange("from"));
+    $("#f-to").addEventListener("change", dateChange("to"));
+    $("#f-reasons").addEventListener("change", () => change(() => {
+      const all = $$("#f-reasons input"), on = all.filter((c) => c.checked).map((c) => c.value);
+      F.reasons = on.length === all.length ? null : on;
+    }));
+    // Se aplica al dejar de teclear y, sin esperar, al salir del campo (change): nada se pierde.
+    const parseRange = (inp) => {
+      const r = RANGES.find((x) => x.k === inp.dataset.r);
+      const v = r.dur ? M.parseDur(inp.value) : M.parseNum(inp.value);
+      if (Number.isNaN(v)) { inp.classList.add("bad"); return false; }
+      inp.classList.remove("bad");
+      const i = +inp.dataset.i;
+      if (F.r[r.k][i] === v) return false;
+      F.r[r.k][i] = v;
+      return true;
+    };
+    const rangeInput = debounce((inp) => { if (parseRange(inp)) apply(); }, 280);
+    $("#f-ranges").addEventListener("input", (e) => { if (e.target.matches("input")) rangeInput(e.target); });
+    $("#f-ranges").addEventListener("change", (e) => { if (e.target.matches("input") && parseRange(e.target)) apply(); });
+    $("#f-hf").addEventListener("change", (e) => change(() => { F.hf = e.target.value === "" ? null : +e.target.value; }));
+    $("#f-ht").addEventListener("change", (e) => change(() => { F.ht = e.target.value === "" ? null : +e.target.value; }));
+    $("#f-wd").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-v]"); if (!b) return;
+      const d = +b.dataset.v;
+      change(() => { F.wd = F.wd.includes(d) ? F.wd.filter((x) => x !== d) : F.wd.concat([d]).sort((a, c) => a - c); });
+    });
+    $("#f-q").addEventListener("input", debounce((e) => { F.q = e.target.value.trim(); apply(); }, 220));
+    $("#f-cap").addEventListener("input", debounce((e) => {
+      const v = M.parseNum(e.target.value);
+      if (Number.isNaN(v) || (v != null && v <= 0)) { e.target.classList.add("bad"); return; }
+      e.target.classList.remove("bad"); F.cap = v; apply();
+    }, 300));
+    $("#btn-reset").addEventListener("click", () => change(() => { const tz = F.tz; F = defaults(); F.tz = tz; }));
+    $$(".fg h3 .x").forEach((x) => x.addEventListener("click", () => change(() => {
+      const d = defaults();
+      if (x.dataset.clear === "period") { F.preset = d.preset; F.from = d.from; F.to = d.to; F.tf = d.tf; }
+      if (x.dataset.clear === "op") { F.side = d.side; F.res = d.res; F.reasons = null; }
+      if (x.dataset.clear === "ranges") F.r = blankRanges();
+      if (x.dataset.clear === "clock") { F.hf = F.ht = null; F.wd = ALL_WD.slice(); }
+    })));
+    $("#chips").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-i]"); if (!b) return;
+      const c = activeChips()[+b.dataset.i]; if (c) change(c[1]);
+    });
+    $("#m-hour").addEventListener("change", (e) => { S.metric.hour = e.target.value; drawHour(); });
+    $("#m-wd").addEventListener("change", (e) => { S.metric.wd = e.target.value; drawWd(); });
+    $("#bk-tabs").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-v]"); if (!b) return;
+      S.bk = b.dataset.v; S.bkSort = null; syncInputs(); renderBk(); writeHash();
+    });
+    $("#bk").addEventListener("click", (e) => {
+      const th = e.target.closest("th[data-k]");
+      if (th) {
+        const k = th.dataset.k, cur = bkSort();
+        S.bkSort = { key: k, dir: cur.key === k && cur.dir === "desc" ? "asc" : (cur.key === k ? "desc" : (k === "sortKey" ? "asc" : "desc")) };
+        renderBk(); return;
+      }
+      const tr = e.target.closest("tbody tr[data-i]");
+      if (tr && S.bkRows) drill(S.bkRows[+tr.dataset.i]);
+    });
+    $("#btn-live").addEventListener("click", () => { S.live = !S.live; renderLive(); if (S.live) tick(); });
+    document.addEventListener("click", (e) => {
+      const tog = e.target.closest("[data-toggle]");
+      $$(".menu.open").forEach((m) => { if (!m.contains(e.target) || (tog && tog.dataset.toggle !== m.id)) m.classList.remove("open"); });
+      if (tog) $("#" + tog.dataset.toggle).classList.toggle("open");
+      const csv = e.target.closest("[data-csv]");
+      if (csv) { exportCSV(csv.dataset.csv); $("#menu-csv").classList.remove("open"); }
+      const a = e.target.closest("a[data-id]");
+      if (a) { e.preventDefault(); selectTrade(+a.dataset.id, true); $("#panel-table").scrollIntoView({ behavior: "smooth", block: "start" }); }
+    });
+    $("#cols-pop").addEventListener("change", (e) => {
+      const c = e.target.closest("input[data-k]"); if (!c) return;
+      if (c.checked) S.cols.add(c.dataset.k); else if (S.cols.size > 1) S.cols.delete(c.dataset.k); else c.checked = true;
+      saveCols(); renderHead(); paintRows();
+    });
+    $("#btn-full").addEventListener("click", () => toggleFull());
+    $("#btn-filters").addEventListener("click", () => document.body.classList.toggle("show-filters"));
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if ($("#panel-table").classList.contains("full")) toggleFull(false);
+      $$(".menu.open").forEach((m) => m.classList.remove("open"));
+      document.body.classList.remove("show-filters");
+    });
+    $("#thead").addEventListener("click", (e) => {
+      const th = e.target.closest(".th[data-k]"); if (!th) return;
+      const k = th.dataset.k;
+      S.sort = S.sort.key === k ? { key: k, dir: S.sort.dir === "asc" ? "desc" : "asc" }
+                                : { key: k, dir: TEXT_COLS.has(k) ? "asc" : "desc" };
+      sortView(); renderHead(); $("#tbl-wrap").scrollTop = 0; paintRows(); renderTableMeta(); writeHash();
+    });
+    $("#tbody").addEventListener("click", (e) => {
+      const row = e.target.closest(".tr[data-id]"); if (!row) return;
+      const id = +row.dataset.id;
+      S.sel = S.sel === id ? null : id;
+      paintRows(); drawEqOverlay(S.hover.eq);
+    });
+    let rafPending = false;
+    $("#tbl-wrap").addEventListener("scroll", () => {
+      if (rafPending) return; rafPending = true;
+      requestAnimationFrame(() => { rafPending = false; paintRows(); });
+    });
+    window.addEventListener("resize", debounce(() => { drawCharts(); paintRows(); }, 120));
+    window.addEventListener("hashchange", () => { readHash(); buildDataControls(); syncInputs(); apply(); });
+  }
+
+  function toggleFull(on) {
+    const p = $("#panel-table"), full = on == null ? !p.classList.contains("full") : on;
+    p.classList.toggle("full", full);
+    $("#btn-full").textContent = full ? "⤡ Reducir" : "⤢ Ampliar";
+    document.body.style.overflow = full ? "hidden" : "";
+    paintRows();
+  }
+
+  // ── filtros activos ──────────────────────────────────────────────────────
+  function periodText() {
+    const b = currentBounds();
+    const a = b.from == null ? "el principio" : M.fmtDate(b.from, F.tz);
+    const z = b.to == null ? "ahora" : M.fmtDate(b.to, F.tz);
+    const what = F.tf === "entry" ? " (por entrada)" : "";
+    return (F.preset === "custom" ? "Periodo" : PRESET_LABEL[F.preset]) + `: ${a} → ${z}` + what;
+  }
+  function rangeText(r, a, b) {
+    const f = (v) => (r.dur ? dur(v) : num(v, 4).replace(/(,\d*?)0+$/, "$1").replace(/,$/, ""));
+    if (a != null && b != null) return `${f(a)} … ${f(b)}`;
+    return a != null ? `≥ ${f(a)}` : `≤ ${f(b)}`;
+  }
+  function activeChips() {
+    const out = [];
+    if (F.sym !== "ALL") out.push(["Par: " + F.sym, () => { F.sym = "ALL"; }]);
+    if (F.preset !== "todo") out.push([periodText(), () => { F.preset = "todo"; F.from = F.to = null; }]);
+    if (F.side !== "ALL") out.push(["Lado: " + F.side, () => { F.side = "ALL"; }]);
+    if (F.res !== "ALL") out.push(["Resultado: " + RES_LABEL[F.res], () => { F.res = "ALL"; }]);
+    if (F.reasons) out.push(["Motivo: " + (F.reasons.join(", ") || "ninguno"), () => { F.reasons = null; }]);
+    for (const r of RANGES) {
+      const [a, b] = F.r[r.k];
+      if (a != null || b != null) out.push([`${r.l}: ${rangeText(r, a, b)} ${r.dur ? "" : r.u}`.trim(), () => { F.r[r.k] = [null, null]; }]);
+    }
+    if (F.hf != null || F.ht != null) {
+      const h = (v) => String(v).padStart(2, "0");
+      out.push([`Hora de entrada: ${F.hf == null ? "00" : h(F.hf)} – ${F.ht == null ? "23" : h(F.ht)} h`, () => { F.hf = F.ht = null; }]);
+    }
+    if (F.wd.length !== 7) out.push(["Días: " + (F.wd.map((d) => WD_SHORT[d]).join(" ") || "ninguno"), () => { F.wd = ALL_WD.slice(); }]);
+    if (F.q) out.push([`Búsqueda: «${F.q}»`, () => { F.q = ""; }]);
+    if (F.cap != null) out.push(["Capital base: " + eur(F.cap, 0), () => { F.cap = null; }]);
+    return out;
+  }
+  function renderChips() {
+    const chips = activeChips();
+    let html = chips.map(([l], i) => `<span class="fchip">${esc(l)}<button type="button" data-i="${i}" title="Quitar este filtro">×</button></span>`).join("");
+    if (S.dropped) html += `<span class="fchip warn-chip" title="Trades del log sin precio, tamaño, hora o P&L válidos">${int(S.dropped)} trades descartados por datos no válidos</span>`;
+    $("#chips").innerHTML = html;
+  }
+
+  // ── cálculo y pintado ────────────────────────────────────────────────────
+  function apply(keepScroll) {
+    if (!S.loaded) return;
+    const t0 = performance.now();
+    S.filtered = M.applyFilters(S.all, filterSpec());
+    const base = baseCapital();
+    S.m = M.compute(S.filtered, base, F.tz);
+    const bal = M.runningBalances(S.filtered, base);
+    for (const t of S.filtered) { const b = bal[t.id]; t._cum = b.cum; t._bal = b.bal; }
+    sortView();
+    renderChips(); renderKpis(); renderEdge(); drawCharts(); renderMetrics(); renderBk();
+    renderHead();
+    if (!keepScroll) $("#tbl-wrap").scrollTop = 0;
+    paintRows(); renderTableMeta();
+    writeHash();
+    S.lastApply = Date.now();
+    S.applyMs = performance.now() - t0;
+    renderCount();
+  }
+  function sortView() { S.view = M.sortTrades(S.filtered, S.sort.key, S.sort.dir); }
+
+  function renderAccount() {
+    let net = 0, wins = 0, fees = 0;
+    for (const t of S.all) { net += t.pnl; fees += t.fee; if (t.pnl > 0) wins++; }
+    const n = S.all.length, base = S.startEquity;
+    $("#acct").innerHTML =
+      `<span class="tag">Cuenta completa</span>` +
+      `<span><span class="k">Trades</span><b class="num">${int(n)}</b></span>` +
+      `<span><span class="k">P&amp;L neto</span><b class="num">${sEur(net)}</b></span>` +
+      `<span><span class="k">Balance</span><b class="num">${eur(base + net)}</b></span>` +
+      `<span><span class="k">ROI</span><b class="num">${sPct(n ? net / base * 100 : 0, 2)}</b></span>` +
+      `<span><span class="k">Win rate</span><b class="num">${pct(n ? wins / n * 100 : null, 2)}</b></span>` +
+      `<span><span class="k">Comisiones</span><b class="num">${eur(fees)}</b></span>` +
+      `<span class="note">todos los pares, sin filtros, capital inicial ${eur(base, 0)} · mismas cifras que el panel en vivo</span>`;
+  }
+  function renderCount() {
+    const n = S.filtered.length;
+    $("#cnt").innerHTML = `${int(n)} <span class="of">de ${int(S.all.length)}</span>`;
+    $("#cnt-sub").textContent = `Zona ${tzName()} · calculado en ${num(S.applyMs, 0)} ms`;
+  }
+
+  const KPIS = [
+    { k: "Balance final", v: (m) => eur(m.final_balance), c: (m) => sgn(m.final_balance - m.start_equity),
+      s: (m) => "desde " + eur(m.start_equity, 0), h: "Capital base + P&L neto de los trades del filtro" },
+    { k: "ROI", v: (m) => pct(m.roi_pct, 2, true), c: (m) => sgn(m.roi_pct),
+      s: (m) => (m.annual_return_pct == null ? "sin anualizar (periodo < 30 días)" : "anualizado " + pct(m.annual_return_pct, 1, true)),
+      h: "P&L neto / capital base" },
+    { k: "P&L neto", v: (m) => eur(m.net, 2, true), c: (m) => sgn(m.net),
+      s: (m) => `bruto ${eur(m.gross, 0, true)} · comisiones ${eur(-m.fees, 0)}`, h: "Después de comisiones; sin funding" },
+    { k: "Trades", v: (m) => int(m.n), c: () => "",
+      s: (m) => `${num(m.trades_per_day, 1)} al día · ${int(m.days_traded)} días con trades`, h: "Trades del filtro" },
+    { k: "Win rate", v: (m) => pct(m.win_rate, 2), c: (m) => (m.breakeven_wr == null ? "" : m.win_rate >= m.breakeven_wr ? "up" : "down"),
+      s: (m) => `${int(m.wins)} G · ${int(m.losses)} P · equilibrio ${pct(m.breakeven_wr, 1)}`,
+      h: "Equilibrio: acierto necesario para no perder con la ganancia y la pérdida medias actuales" },
+    { k: "Profit factor", v: (m) => ratio(m.profit_factor), c: (m) => (m.profit_factor == null ? "" : m.profit_factor >= 1 ? "up" : "down"),
+      s: (m) => `payoff ${ratio(m.payoff)} · media ${eur(m.expectancy, 2, true)}`, h: "Suma de ganancias / |suma de pérdidas|" },
+    { k: "Máx. drawdown", v: (m) => eur(-m.max_dd, 0), c: (m) => (m.max_dd > 0 ? "down" : ""),
+      s: (m) => `${pct(-m.max_dd_pct, 1)} · ${dur(m.max_dd_duration)}`, h: "Mayor caída desde un máximo; % sobre ese máximo; duración más larga" },
+    { k: "Sharpe", v: (m) => ratio(m.sharpe), c: (m) => sgn(m.sharpe),
+      s: (m) => `Sortino ${ratio(m.sortino)} · Calmar ${m.calmar == null ? EM : ratio(m.calmar)}`,
+      h: "Sobre el P&L diario (días naturales), anualizado con √365" },
+  ];
+  function renderKpis() {
+    const m = S.m;
+    $("#kpis").innerHTML = KPIS.map((k) => {
+      const ok = m && m.n;
+      return `<div class="kpi ${ok ? k.c(m) : ""}" title="${esc(k.h)}"><div class="k">${k.k}</div>` +
+             `<div class="v num ${ok ? k.c(m) : ""}">${ok ? k.v(m) : EM}</div><div class="s num">${ok ? k.s(m) : "&nbsp;"}</div></div>`;
+    }).join("");
+  }
+
+  function renderEdge() {
+    const m = S.m, el = $("#edge");
+    if (!m || !m.n || m.gross_bps == null) { el.innerHTML = `<div class="empty" style="grid-column:1/-1">Sin trades con estos filtros</div>`; return; }
+    const g = m.gross_bps, f = m.fee_bps, n = m.net_bps;
+    const mx = Math.max(Math.abs(g), Math.abs(f), Math.abs(n), 1e-12);
+    const bar = (label, val, color, help) =>
+      `<div class="ebar" title="${esc(help)}"><span class="dim">${label}</span>` +
+      `<div class="track"><i style="width:${(Math.abs(val) / mx * 100).toFixed(3)}%;background:${color}"></i></div>` +
+      `<span class="val num ${sgn(val)}">${M.fmtSigned(val, 2)} pb</span></div>`;
+    const parts = [
+      `Antes de costes, los trades ganan de media <b class="${sgn(g)}">${M.fmtSigned(g, 2)} pb</b> del nocional; ` +
+      `las comisiones cuestan <b>${num(f, 2)} pb</b> (entrada + salida) y el neto queda en <b class="${sgn(n)}">${M.fmtSigned(n, 2)} pb</b> por trade.`,
+    ];
+    if (m.breakeven_wr != null) parts.push(`Con la ganancia y la pérdida medias actuales, para no perder haría falta acertar el <b>${pct(m.breakeven_wr, 1)}</b>; el acierto real es <b class="${m.win_rate >= m.breakeven_wr ? "up" : "down"}">${pct(m.win_rate, 1)}</b>.`);
+    if (g > 0 && n < 0) parts.push(`El bruto es positivo: con comisiones por debajo de <b>${num(g, 2)} pb</b> por trade (ida y vuelta) el resultado habría sido positivo.`);
+    if (g <= 0) parts.push(`El bruto ya es negativo: el problema no son solo las comisiones.`);
+    el.innerHTML = `<div>` +
+      bar("Ventaja bruta", g, g >= 0 ? C.green : C.red, "P&L antes de comisiones / nocional total") +
+      bar("Comisiones", -f, C.amber, "Comisiones / nocional total") +
+      bar("Neto", n, n >= 0 ? C.green : C.red, "P&L neto / nocional total") +
+      `</div><p>${parts.join(" ")}</p>`;
+  }
+
+  // ── métricas completas ───────────────────────────────────────────────────
+  function renderMetrics() {
+    const m = S.m, el = $("#metrics");
+    if (!m || !m.n) { el.innerHTML = `<div class="empty" style="grid-column:1/-1">Sin trades con estos filtros</div>`; return; }
+    const NA30 = `<span class="na">— (periodo &lt; 30 días)</span>`;
+    const idLink = (id) => (id == null ? "" : ` <a href="#" data-id="${id}" title="Ver en la tabla">#${id}</a>`);
+    const groups = [
+      ["Resultado", [
+        ["Capital base", eur(m.start_equity), "Capital del que parte el cálculo. Se cambia en «Capital base»."],
+        ["Balance final", span(sgn(m.final_balance - m.start_equity), eur(m.final_balance)), "Capital base + P&L neto."],
+        ["P&L neto", sEur(m.net), "Suma del P&L de cada trade, ya descontadas las comisiones de entrada y salida. Sin funding."],
+        ["P&L bruto (sin comisiones)", sEur(m.gross), "P&L neto + comisiones."],
+        ["Comisiones pagadas", span(m.fees > 0 ? "down" : "", eur(-m.fees)), "Comisiones de entrada + salida."],
+        ["ROI", sPct(m.roi_pct, 2), "P&L neto / capital base."],
+        ["Rentabilidad anualizada (simple)", m.annual_return_pct == null ? NA30 : sPct(m.annual_return_pct, 1), "ROI × 365 / días del periodo. Solo con 30 días o más."],
+        ["CAGR (compuesta)", m.cagr_pct != null ? sPct(m.cagr_pct, 1) : (m.period_days < 30 ? NA30 : `<span class="na">— (balance final ≤ 0)</span>`), "(balance final / capital base) ^ (365 / días) − 1. Solo con 30 días o más y balance final positivo."],
+        ["Comisiones sobre el capital", pct(m.fees_pct_capital, 1), "Comisiones / capital base."],
+      ]],
+      ["Calidad de las operaciones", [
+        ["Win rate", pct(m.win_rate, 2), "Trades con P&L neto > 0 / total de trades."],
+        ["Win rate de equilibrio", pct(m.breakeven_wr, 1), "Acierto necesario para quedar a 0 con la ganancia y la pérdida medias actuales: |pérdida media| / (ganancia media + |pérdida media|)."],
+        ["Ganadoras · perdedoras · a cero", `${span("up", int(m.wins))} · ${span("down", int(m.losses))} · ${int(m.flats)}`, "P&L neto > 0, < 0 y exactamente 0."],
+        ["Profit factor", ratio(m.profit_factor), "Suma de ganancias / |suma de pérdidas|. Por encima de 1, la estrategia gana."],
+        ["Payoff (ganancia media / pérdida media)", ratio(m.payoff), "Ganancia media / |pérdida media|."],
+        ["Esperanza por trade", sEur(m.expectancy), "P&L neto medio por trade."],
+        ["Esperanza por trade (% del nocional)", sPct(m.expectancy_pct, 4), "Media de la rentabilidad de cada trade sobre su nocional."],
+        ["Ganancia media", `${sEur(m.avg_win)} · ${sPct(m.avg_win_pct, 3)}`, "Media de los trades ganadores, en € y en % del nocional."],
+        ["Pérdida media", `${sEur(m.avg_loss)} · ${sPct(m.avg_loss_pct, 3)}`, "Media de los trades perdedores, en € y en % del nocional."],
+        ["Suma de ganancias", sEur(m.sum_win), "Suma del P&L de los trades ganadores."],
+        ["Suma de pérdidas", sEur(m.sum_loss), "Suma del P&L de los trades perdedores."],
+        ["Mayor ganancia", sEur(m.largest_win) + idLink(m.largest_win_id), "Clic en el número para verlo en la tabla."],
+        ["Mayor pérdida", sEur(m.largest_loss) + idLink(m.largest_loss_id), "Clic en el número para verlo en la tabla."],
+        ["Mediana del P&L", sEur(m.median_pnl), "El trade del medio: la mitad gana más y la otra mitad menos."],
+        ["Desviación típica del P&L", eur(m.std_pnl), "Dispersión del P&L por trade (muestral)."],
+        ["SQN", ratio(m.sqn), "System Quality Number de Van Tharp: √min(n, 100) × media / desviación del P&L por trade."],
+        ["Kelly", pct(m.kelly_pct, 1, true), "W − (1 − W) / payoff, con W = acierto entre ganadoras y perdedoras. Negativo: no hay ventaja que apostar."],
+      ]],
+      ["Riesgo", [
+        ["Máximo drawdown", span(m.max_dd > 0 ? "down" : "", eur(-m.max_dd)), "Mayor caída del balance desde un máximo previo."],
+        ["Máximo drawdown %", span(m.max_dd_pct > 0 ? "down" : "", pct(-m.max_dd_pct, 2)), "Esa caída sobre el máximo del que parte. Puede pasar del 100 % si el balance queda negativo."],
+        ["Pico → valle del máximo", m.max_dd > 0 ? `${M.fmtDate(m.max_dd_peak_ts, F.tz)} → ${M.fmtDate(m.max_dd_trough_ts, F.tz)}` : EM, "Cuándo empezó y cuándo tocó fondo el mayor drawdown."],
+        ["Drawdown más largo", dur(m.max_dd_duration), "Tiempo más largo desde un máximo hasta volver a él (o hasta el final, si no se recupera)."],
+        ["Drawdown actual", `${eur(-m.current_dd)} · ${pct(-m.current_dd_pct, 2)}`, "Distancia del balance final a su máximo."],
+        ["Mayor subida (run-up)", sEur(m.max_runup), "Mayor subida del balance desde un mínimo previo."],
+        ["Recovery factor", ratio(m.recovery_factor), "P&L neto / máximo drawdown."],
+        ["Ulcer index", num(m.ulcer_index, 2), "Raíz de la media de los drawdowns % al cuadrado, medidos en cada cierre."],
+        ["Sharpe (diario, anualizado)", ratio(m.sharpe), "Media / desviación del P&L diario × √365, con todos los días naturales del periodo (los días sin trades cuentan 0). No depende del capital."],
+        ["Sortino", ratio(m.sortino), "Como Sharpe, pero dividiendo solo por la volatilidad de los días negativos."],
+        ["Calmar", m.calmar == null ? NA30 : ratio(m.calmar), "P&L neto anualizado / máximo drawdown. Solo con 30 días o más."],
+        ["Volatilidad anual del P&L", `${eur(m.vol_annual, 0)} · ${pct(m.vol_annual_pct, 1)}`, "Desviación del P&L diario × √365, en € y sobre el capital base."],
+      ]],
+      ["Rachas y ritmo", [
+        ["Mayor racha ganadora", int(m.max_win_streak) + " trades", "Más trades ganadores seguidos (los trades a cero no cortan la racha)."],
+        ["Mayor racha perdedora", int(m.max_loss_streak) + " trades", "Más trades perdedores seguidos."],
+        ["Racha actual", m.current_streak > 0 ? span("up", int(m.current_streak) + (m.current_streak === 1 ? " ganadora" : " ganadoras"))
+          : m.current_streak < 0 ? span("down", int(-m.current_streak) + (m.current_streak === -1 ? " perdedora" : " perdedoras")) : EM,
+          "La racha con la que acaba el filtro."],
+        ["Primer trade (entrada)", M.fmtDate(m.first_ts, F.tz, true), ""],
+        ["Último trade (salida)", M.fmtDate(m.last_ts, F.tz, true), ""],
+        ["Periodo", num(m.period_days, 1) + " días", "De la primera entrada a la última salida."],
+        ["Trades al día", num(m.trades_per_day, 1), "Trades / días del periodo."],
+        ["Días con trades / días naturales", `${int(m.days_traded)} / ${int(m.calendar_days)}`, "Días con algún cierre / días de calendario del periodo."],
+        ["Días positivos", pct(m.positive_days_pct, 1), "De los días con trades, los que acaban con P&L neto > 0."],
+        ["Mejor día", sEur(m.best_day) + (m.best_day_key ? ` <span class="dim">${M.fmtDayKey(m.best_day_key)}</span>` : ""), "Día (por hora de salida) con mayor P&L neto."],
+        ["Peor día", sEur(m.worst_day) + (m.worst_day_key ? ` <span class="dim">${M.fmtDayKey(m.worst_day_key)}</span>` : ""), "Día con menor P&L neto."],
+        ["Media por día con trades", sEur(m.avg_day), "P&L neto / días con trades."],
+        ["Exposición (tiempo en posición)", pct(m.exposure_pct, 2), "Parte del periodo con una posición abierta."],
+      ]],
+      ["Ejecución y costes", [
+        ["Duración media", dur(m.avg_duration), "De la entrada a la salida."],
+        ["Duración mediana", dur(m.median_duration), ""],
+        ["Duración media de las ganadoras", dur(m.avg_duration_win), ""],
+        ["Duración media de las perdedoras", dur(m.avg_duration_loss), ""],
+        ["Nocional medio", eur(m.avg_notional), "Precio de entrada × tamaño."],
+        ["Nocional total", eur(m.total_notional, 0), "Suma del nocional de entrada de todos los trades."],
+        ["Movimiento medio a favor", sNum(m.avg_move_bps, 2) + " pb", "Media de (salida − entrada) / entrada en puntos básicos, con el signo del lado: positivo = a favor."],
+        ["Ventaja bruta", sNum(m.gross_bps, 2) + " pb", "P&L bruto / nocional total."],
+        ["Coste en comisiones", num(m.fee_bps, 2) + " pb", "Comisiones / nocional total (entrada + salida)."],
+        ["Resultado neto", sNum(m.net_bps, 2) + " pb", "P&L neto / nocional total."],
+        ["Comisiones / P&L bruto", m.fee_drag_pct == null ? `<span class="na">— (bruto ≤ 0)</span>` : pct(m.fee_drag_pct, 1), "Qué parte del beneficio antes de costes se llevan las comisiones."],
+      ]],
+    ];
+    const sideRow = (lbl, s) => `<tr><td><span class="side-tag ${lbl}">${lbl}</span></td><td>${int(s.n)}</td>` +
+      `<td>${pct(s.win_rate, 1)}</td><td>${sNum(s.net, 2)}</td><td>${sNum(s.avg, 2)}</td><td>${num(s.fees, 2)}</td></tr>`;
+    el.innerHTML = groups.map(([t, rows]) => `<div class="mg"><h4>${t}</h4><dl class="kv num">` +
+      rows.map(([k, v, h]) => `<dt title="${esc(h)}">${esc(k)}</dt><dd>${v}</dd>`).join("") + `</dl></div>`).join("") +
+      `<div class="mg"><h4>Long frente a short</h4><table class="ls num"><thead><tr><th>Lado</th><th>Trades</th><th>WR</th>` +
+      `<th>Neto €</th><th>Media €</th><th>Comis. €</th></tr></thead><tbody>${sideRow("LONG", m.long)}${sideRow("SHORT", m.short)}</tbody></table></div>`;
+  }
+
+  // ── desglose ─────────────────────────────────────────────────────────────
+  function bkDef() { return BK.find((b) => b.k === S.bk) || BK[0]; }
+  function bkSort() {
+    if (S.bkSort) return S.bkSort;
+    return bkDef().period ? { key: "sortKey", dir: "desc" } : { key: "sortKey", dir: "asc" };
+  }
+  function bkGroups() {
+    const tab = bkDef(), t = S.filtered, base = baseCapital();
+    let rows;
+    if (tab.period) rows = M.groupPeriods(t, tab.period, F.tz, base).map((g) => Object.assign(g, { label: periodLabel(tab.period, g.key), sortKey: g.key }));
+    else if (tab.k === "hour") rows = M.byHour(t, F.tz).filter((g) => g.n).map((g) => Object.assign(g, { label: `${String(g.key).padStart(2, "0")}:00 – ${String(g.key).padStart(2, "0")}:59`, sortKey: g.key }));
+    else if (tab.k === "wd") rows = M.byWeekday(t, F.tz).filter((g) => g.n).map((g) => Object.assign(g, { label: WD_LONG[g.key], sortKey: g.key }));
+    else if (tab.k === "dur") rows = M.byDuration(t).map((g) => Object.assign(g, { label: g.key, sortKey: M.DURATION_BUCKETS.findIndex((b) => b.key === g.key) }));
+    else {
+      const key = tab.k === "reason" ? (x) => x.reason : tab.k === "side" ? (x) => x.side : (x) => x.symbol;
+      rows = M.groupBy(t, key).map((g) => Object.assign(g, { label: g.key || "(sin motivo)", sortKey: g.key }));
+    }
+    return rows;
+  }
+  function renderBk() {
+    const tab = bkDef(), sort = bkSort(), cols = BK_COLS.filter((c) => !c.period || tab.period);
+    const rows = M.sortTrades(bkGroups(), sort.key, sort.dir);
+    S.bkRows = rows;
+    $("#bk-sub").textContent = rows.length ? `${int(rows.length)} grupos` : "";
+    const m = S.m;
+    if (!rows.length || !m) { $("#bk").innerHTML = `<tbody><tr><td class="empty">Sin trades con estos filtros</td></tr></tbody>`; return; }
+    const head = `<thead><tr>${cols.map((c) => `<th data-k="${c.k}" class="${sort.key === c.k ? "sorted" : ""}">${c.l}${sort.key === c.k ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}</th>`).join("")}</tr></thead>`;
+    const body = rows.map((g, i) => `<tr data-i="${i}" title="Filtrar por ${esc(g.label)}">${cols.map((c) => `<td>${c.f(g)}</td>`).join("")}</tr>`).join("");
+    const tot = { sortKey: "", label: "Total", n: m.n, wins: m.wins, win_rate: m.win_rate, net: m.net, gross: m.gross, fees: m.fees,
+                  profit_factor: m.profit_factor, avg: m.expectancy, net_bps: m.net_bps, avg_duration: m.avg_duration,
+                  roi_pct: m.roi_pct, bal_end: m.final_balance, max_dd: m.max_dd };
+    const foot = `<tfoot><tr>${cols.map((c) => `<td>${c.k === "sortKey" ? "Total" : c.f(tot)}</td>`).join("")}</tr></tfoot>`;
+    $("#bk").innerHTML = head + `<tbody>${body}</tbody>` + foot;
+  }
+  function drill(g) {
+    const tab = bkDef();
+    change(() => {
+      if (tab.period) { const [a, b] = M.periodRange(tab.period, g.key, F.tz); F.preset = "custom"; F.from = a; F.to = b; F.tf = "exit"; }
+      else if (tab.k === "reason") F.reasons = [g.key];
+      else if (tab.k === "side") F.side = g.key;
+      else if (tab.k === "symbol") F.sym = g.key;
+      else if (tab.k === "hour") { F.hf = +g.key; F.ht = +g.key; }
+      else if (tab.k === "wd") F.wd = [+g.key];
+      else if (tab.k === "dur") {
+        const i = M.DURATION_BUCKETS.findIndex((b) => b.key === g.key);
+        F.r.dur = [i > 0 ? M.DURATION_BUCKETS[i - 1].max : null, isFinite(M.DURATION_BUCKETS[i].max) ? M.DURATION_BUCKETS[i].max : null];
+      }
+    });
+    toast("Filtro aplicado: " + g.label);
+  }
+
+  // ── tabla virtual ────────────────────────────────────────────────────────
+  function renderHead() {
+    const cols = visibleCols();
+    $("#tbl-wrap").style.setProperty("--cols", cols.map((c) => c.w + "px").join(" "));
+    $("#thead").innerHTML = cols.map((c) => {
+      const on = S.sort.key === c.k;
+      return `<div class="th${c.r ? " r" : ""}${on ? " sorted" : ""}" data-k="${c.k}" title="${esc(c.t || "Ordenar por " + c.l)}">${c.l}${on ? (S.sort.dir === "asc" ? " ▲" : " ▼") : ""}</div>`;
+    }).join("");
+    $("#cols-pop").innerHTML = COLS.map((c) => `<label><input type="checkbox" data-k="${c.k}"${S.cols.has(c.k) ? " checked" : ""} />${esc(c.l)}</label>`).join("");
+  }
+  function paintRows() {
+    const wrap = $("#tbl-wrap"), body = $("#tbody"), cols = visibleCols(), n = S.view.length;
+    body.style.height = n * ROW_H + "px";
+    if (!n) { body.innerHTML = `<div class="empty">${S.loaded ? "Sin trades con estos filtros" : "Cargando…"}</div>`; body.style.height = "auto"; return; }
+    const headH = $("#thead").offsetHeight;
+    const top = Math.max(0, wrap.scrollTop - headH);
+    const first = Math.max(0, Math.floor(top / ROW_H) - 10);
+    const last = Math.min(n, first + Math.ceil(wrap.clientHeight / ROW_H) + 20);
+    let html = "";
+    for (let i = first; i < last; i++) {
+      const t = S.view[i];
+      html += `<div class="tr${i % 2 ? " odd" : ""}${t.id === S.sel ? " sel" : ""}" data-id="${t.id}" style="top:${i * ROW_H}px">` +
+              cols.map((c) => `<div class="td${c.r ? " r" : ""}${c.cls ? " " + c.cls : ""}">${c.f(t)}</div>`).join("") + `</div>`;
+    }
+    body.innerHTML = html;
+  }
+  function renderTableMeta() {
+    const m = S.m, c = COLS.find((x) => x.k === S.sort.key);
+    $("#tbl-sub").textContent = `${int(S.view.length)} filas, todas · orden: ${c ? c.l : S.sort.key} ${S.sort.dir === "asc" ? "▲" : "▼"} · hora ${tzName()}`;
+    $("#tfoot").innerHTML = !m || !m.n ? "" :
+      `<span>${int(m.n)} trades</span><span>neto <b>${sEur(m.net)}</b></span><span>bruto <b>${sEur(m.gross)}</b></span>` +
+      `<span>comisiones <b>${eur(m.fees)}</b></span><span>nocional <b>${eur(m.total_notional, 0)}</b></span>` +
+      `<span class="faint">sin paginación: desplázate para ver todos · clic en una fila para marcarla en la curva</span>`;
+  }
+  function selectTrade(id, scroll) {
+    S.sel = id;
+    const idx = S.view.findIndex((t) => t.id === id);
+    if (idx < 0) toast(`El trade #${id} no está en el filtro actual`);
+    else if (scroll) {
+      const wrap = $("#tbl-wrap");
+      wrap.scrollTop = Math.max(0, $("#thead").offsetHeight + idx * ROW_H - wrap.clientHeight / 2);
+    }
+    paintRows(); drawEqOverlay(S.hover.eq);
+  }
+  function exportCSV(fmt) {
+    if (!S.view.length) { toast("No hay trades que exportar con estos filtros"); return; }
+    const balances = {};
+    for (const t of S.view) balances[t.id] = { cum: t._cum, bal: t._bal };
+    const csv = M.toCSV(S.view, balances, F.tz === "utc" ? "utc" : "local", fmt);
+    const blob = new Blob([fmt === "es" ? "﻿" + csv : csv], { type: "text/csv;charset=utf-8" });
+    const d = new Date(), p2 = (x) => String(x).padStart(2, "0");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `pavilos_trades_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast(`${int(S.view.length)} trades exportados`);
+  }
+
+  // ── gráficos (canvas, sin librerías) ─────────────────────────────────────
+  function prep(cv) {
+    const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+    const W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr));
+    if (cv.width !== W) cv.width = W;
+    if (cv.height !== H) cv.height = H;
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.font = "10px " + C.mono; ctx.lineWidth = 1;
+    return { ctx, w, h };
+  }
+  function emptyChart(ctx, w, h, msg) {
+    ctx.fillStyle = C.faint; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = "11px " + C.mono; ctx.fillText(msg.toUpperCase(), w / 2, h / 2);
+  }
+  function yTicks(lo, hi, count) {
+    if (!(hi > lo)) hi = lo + 1;
+    const raw = (hi - lo) / Math.max(1, count), mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
+    const st = (r < 1.5 ? 1 : r < 3 ? 2 : r < 7 ? 5 : 10) * mag, out = [];
+    for (let v = Math.ceil(lo / st) * st; v <= hi + st * 1e-9; v += st) out.push(Math.abs(v) < st * 1e-9 ? 0 : v);
+    return out;
+  }
+  function timeTicks(x0, x1, maxN) {
+    const H = 3600, D = 86400, span = Math.max(1, x1 - x0), tz = F.tz;
+    const steps = [H, 3 * H, 6 * H, 12 * H, D, 2 * D, 7 * D, 14 * D, 30 * D, 91 * D, 182 * D, 365 * D];
+    const step = steps.find((s) => span / s <= maxN) || 365 * D;
+    const out = [], p = M.parts(x0, tz);
+    if (step < D) {
+      const hs = step / H;
+      for (let k = 1; out.length < 400; k++) { const t = M.mkTs(p.y, p.m, p.d, Math.ceil(p.hour / hs) * hs + (k - 1) * hs, 0, tz); if (t > x1) break; if (t >= x0) out.push(t); }
+    } else if (step < 30 * D) {
+      const ds = step / D;
+      for (let k = 1; out.length < 400; k += ds) { const t = M.mkTs(p.y, p.m, p.d + k, 0, 0, tz); if (t > x1) break; out.push(t); }
+    } else {
+      const ms = Math.round(step / (30 * D));
+      for (let k = 1; out.length < 400; k += ms) { const t = M.mkTs(p.y, p.m + k, 1, 0, 0, tz); if (t > x1) break; out.push(t); }
+    }
+    const fmt = (t) => {
+      const q = M.parts(t, tz), dd = String(q.d).padStart(2, "0"), mm = String(q.m + 1).padStart(2, "0");
+      if (step < D) return `${dd}/${mm} ${String(q.hour).padStart(2, "0")}h`;
+      if (step < 30 * D) return `${dd}/${mm}`;
+      return `${MONTHS[q.m]} ${String(q.y).slice(2)}`;
+    };
+    return { ticks: out, fmt };
+  }
+
+  function drawCharts() { drawEquity(); drawDaily(); drawHist(); drawHour(); drawWd(); }
+
+  function drawEquity() {
+    const cv = $("#cv-eq"), { ctx, w, h } = prep(cv), m = S.m, pts = m ? m.equity : [];
+    cv._g = null;
+    $("#eq-sub").textContent = m && m.n ? `${int(m.n)} trades · capital base ${eur(m.start_equity, 0)} · máx. DD ${eur(-m.max_dd, 0)}` : "";
+    if (!m || pts.length < 2) { emptyChart(ctx, w, h, S.loaded ? "Sin trades con estos filtros" : "Cargando…"); drawEqOverlay(-1); return; }
+    const L = 70, R = 16, T = 16, B = 24, GAP = 14;
+    const ddH = Math.max(46, Math.round((h - T - B) * 0.25)), eqH = h - T - B - ddH - GAP, pw = w - L - R;
+    const x0 = pts[0].ts, x1 = pts[pts.length - 1].ts, base = m.start_equity;
+    let lo = base, hi = base, ddMax = 0;
+    for (const p of pts) { if (p.bal < lo) lo = p.bal; if (p.bal > hi) hi = p.bal; if (p.dd > ddMax) ddMax = p.dd; }
+    const pad = (hi - lo) * 0.07 || Math.max(1, Math.abs(base) * 0.01);
+    lo -= pad; hi += pad;
+    const X = (ts) => L + (x1 > x0 ? (ts - x0) / (x1 - x0) : 0.5) * pw;
+    const Y = (b) => T + (1 - (b - lo) / (hi - lo)) * eqH;
+    const ddTop = T + eqH + GAP;
+    const YD = (d) => ddTop + (ddMax > 0 ? d / ddMax : 0) * ddH;
+    cv._g = { L, pw, X, Y, YD, x0, x1, pts, T, eqH, ddTop, ddH, h };
+
+    ctx.textBaseline = "middle"; ctx.textAlign = "right";
+    for (const v of yTicks(lo, hi, 5)) {
+      const y = Math.round(Y(v)) + 0.5;
+      ctx.strokeStyle = C.rule; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w - R, y); ctx.stroke();
+      ctx.fillStyle = C.faint; ctx.fillText(compact(v), L - 8, y);
+    }
+    ctx.strokeStyle = C.ruleHot; ctx.beginPath(); ctx.moveTo(L, Math.round(ddTop) + 0.5); ctx.lineTo(w - R, Math.round(ddTop) + 0.5); ctx.stroke();
+    ctx.fillStyle = C.faint;
+    ctx.fillText("DD", L - 8, ddTop + 7);
+    if (ddMax > 0) ctx.fillText(compact(-ddMax), L - 8, ddTop + ddH - 5);
+    const tt = timeTicks(x0, x1, Math.max(2, Math.floor(pw / 92)));
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    for (const t of tt.ticks) {
+      const x = Math.round(X(t)) + 0.5;
+      ctx.strokeStyle = "rgba(255,255,255,.035)"; ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, ddTop + ddH); ctx.stroke();
+      ctx.fillStyle = C.faint; ctx.fillText(tt.fmt(t), x, h - 7);
+    }
+    // capital base
+    const yb = Math.round(Y(base)) + 0.5;
+    ctx.setLineDash([4, 4]); ctx.strokeStyle = C.amber; ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.moveTo(L, yb); ctx.lineTo(w - R, yb); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+    ctx.fillStyle = C.amber; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+    ctx.fillText("capital base " + compact(base), L + 6, yb - 3);
+
+    // serie reducida a columnas de píxel (mín./máx. por columna: no se pierde ningún pico)
+    const nCols = Math.max(1, Math.floor(pw)), cols = [];
+    if (pts.length <= nCols * 2) for (const p of pts) cols.push({ x: X(p.ts), a: p.bal, mn: p.bal, mx: p.bal, z: p.bal, dd: p.dd });
+    else {
+      let cur = null, ck = -1;
+      for (const p of pts) {
+        const k = Math.min(nCols - 1, Math.max(0, Math.floor(X(p.ts) - L)));
+        if (k !== ck) { cur = { x: L + k + 0.5, a: p.bal, mn: p.bal, mx: p.bal, z: p.bal, dd: p.dd }; cols.push(cur); ck = k; }
+        else { if (p.bal < cur.mn) cur.mn = p.bal; if (p.bal > cur.mx) cur.mx = p.bal; cur.z = p.bal; if (p.dd > cur.dd) cur.dd = p.dd; }
+      }
+    }
+    const path = () => {
+      ctx.beginPath();
+      cols.forEach((c, i) => {
+        if (i === 0) ctx.moveTo(c.x, Y(c.a)); else ctx.lineTo(c.x, Y(c.a));
+        if (c.mn !== c.mx) { ctx.lineTo(c.x, Y(c.mn)); ctx.lineTo(c.x, Y(c.mx)); }
+        ctx.lineTo(c.x, Y(c.z));
+      });
+    };
+    const grad = ctx.createLinearGradient(0, T, 0, T + eqH);
+    grad.addColorStop(0, "rgba(79,214,224,.22)"); grad.addColorStop(1, "rgba(79,214,224,0)");
+    path(); ctx.lineTo(cols[cols.length - 1].x, T + eqH); ctx.lineTo(cols[0].x, T + eqH); ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
+    path(); ctx.strokeStyle = C.cyan; ctx.lineWidth = 1.5; ctx.shadowColor = "rgba(79,214,224,.45)"; ctx.shadowBlur = 6; ctx.stroke();
+    ctx.shadowBlur = 0; ctx.lineWidth = 1;
+    // drawdown (hacia abajo)
+    ctx.beginPath(); ctx.moveTo(cols[0].x, ddTop);
+    for (const c of cols) ctx.lineTo(c.x, YD(c.dd));
+    ctx.lineTo(cols[cols.length - 1].x, ddTop); ctx.closePath();
+    const g2 = ctx.createLinearGradient(0, ddTop, 0, ddTop + ddH);
+    g2.addColorStop(0, "rgba(255,93,93,.12)"); g2.addColorStop(1, "rgba(255,93,93,.42)");
+    ctx.fillStyle = g2; ctx.fill(); ctx.strokeStyle = "rgba(255,93,93,.75)"; ctx.stroke();
+    // pico y valle del máximo drawdown
+    if (m.max_dd > 0 && m.max_dd_peak_ts != null) {
+      const xp = X(m.max_dd_peak_ts), xt = X(m.max_dd_trough_ts);
+      const pk = pts[M.nearestIndex(pts, m.max_dd_peak_ts)], tr = pts[M.nearestIndex(pts, m.max_dd_trough_ts)];
+      ctx.setLineDash([2, 3]); ctx.strokeStyle = "rgba(255,93,93,.55)";
+      ctx.beginPath(); ctx.moveTo(xp, Y(pk.bal)); ctx.lineTo(xt, Y(pk.bal)); ctx.lineTo(xt, Y(tr.bal)); ctx.stroke(); ctx.setLineDash([]);
+      for (const [x, y, c] of [[xp, Y(pk.bal), C.amber], [xt, Y(tr.bal), C.red]]) {
+        ctx.beginPath(); ctx.arc(x, y, 3.2, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill();
+      }
+      ctx.fillStyle = C.red; ctx.textAlign = xt > w - 140 ? "right" : "left"; ctx.textBaseline = "top";
+      ctx.fillText(`máx. DD ${compact(-m.max_dd)}`, xt + (xt > w - 140 ? -6 : 6), Math.min(Y(tr.bal) + 4, T + eqH - 12));
+    }
+    drawEqOverlay(S.hover.eq);
+  }
+  function drawEqOverlay(hi) {
+    const ov = $("#cv-eq-ov"), { ctx } = prep(ov), g = $("#cv-eq")._g;
+    if (!g) return;
+    if (S.sel != null) {
+      const t = S.byId.get(S.sel);
+      if (t && t.exit_ts >= g.x0 && t.exit_ts <= g.x1 && S.filtered.includes(t)) {
+        const x = Math.round(g.X(t.exit_ts)) + 0.5;
+        ctx.strokeStyle = C.amber; ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.moveTo(x, g.T); ctx.lineTo(x, g.ddTop + g.ddH); ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.fillStyle = C.amber; ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillText("#" + t.id, x + 4, g.T);
+      }
+    }
+    if (hi != null && hi >= 0 && hi < g.pts.length) {
+      const p = g.pts[hi], x = Math.round(g.X(p.ts)) + 0.5;
+      ctx.strokeStyle = "rgba(199,212,222,.28)"; ctx.beginPath(); ctx.moveTo(x, g.T); ctx.lineTo(x, g.ddTop + g.ddH); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, g.Y(p.bal), 4, 0, Math.PI * 2); ctx.fillStyle = C.cyan; ctx.shadowColor = C.cyan; ctx.shadowBlur = 10; ctx.fill(); ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.arc(x, g.YD(p.dd), 3, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill();
+    }
+  }
+  function bindEquity() {
+    const ov = $("#cv-eq-ov");
+    ov.addEventListener("mousemove", (e) => {
+      const g = $("#cv-eq")._g; if (!g) return;
+      const x = e.clientX - ov.getBoundingClientRect().left;
+      if (x < g.L - 4 || x > g.L + g.pw + 4) { S.hover.eq = -1; hideTip(); drawEqOverlay(-1); return; }
+      const ts = g.x0 + Math.min(1, Math.max(0, (x - g.L) / g.pw)) * (g.x1 - g.x0);
+      const i = M.nearestIndex(g.pts, ts), p = g.pts[i], t = p.id != null ? S.byId.get(p.id) : null;
+      S.hover.eq = i; drawEqOverlay(i);
+      ov.style.cursor = t ? "pointer" : "default";
+      showTip(e, `<div class="h">${t ? "trade #" + t.id + " · " + esc(t.side) + " · " + esc(t.symbol) : "inicio"}</div>` +
+        `${M.fmtDate(p.ts, F.tz, true)}<br>balance <b>${eur(p.bal)}</b><br>drawdown <span class="${p.dd > 0 ? "down" : ""}">${eur(-p.dd)} · ${pct(-p.dd_pct, 2)}</span>` +
+        (t ? `<br>P&amp;L del trade ${sEur(t.pnl)} · ${dur(t.duration)}` : ""));
+    });
+    ov.addEventListener("mouseleave", () => { S.hover.eq = -1; hideTip(); drawEqOverlay(-1); });
+    ov.addEventListener("click", () => {
+      const g = $("#cv-eq")._g; if (!g || S.hover.eq < 0) return;
+      const p = g.pts[S.hover.eq]; if (p.id != null) selectTrade(p.id, true);
+    });
+  }
+
+  // Barras genéricas: items [{label, v, color, tip}]; o.hover = índice resaltado.
+  function drawBars(cv, items, o) {
+    const { ctx, w, h } = prep(cv);
+    cv._bars = null;
+    if (!items.length) { emptyChart(ctx, w, h, S.loaded ? "Sin trades con estos filtros" : "Cargando…"); return; }
+    const L = 60, R = 10, T = 12, B = 22, ph = h - T - B, pw = w - L - R;
+    let lo = 0, hi = 0;
+    for (const it of items) { if (it.v < lo) lo = it.v; if (it.v > hi) hi = it.v; }
+    if (lo === hi) hi = lo + 1;
+    const padv = (hi - lo) * 0.08; if (lo < 0) lo -= padv; if (hi > 0) hi += padv;
+    const Y = (v) => T + (1 - (v - lo) / (hi - lo)) * ph;
+    ctx.textBaseline = "middle"; ctx.textAlign = "right";
+    for (const v of yTicks(lo, hi, 4)) {
+      const y = Math.round(Y(v)) + 0.5;
+      ctx.strokeStyle = v === 0 ? C.ruleHot : C.rule; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w - R, y); ctx.stroke();
+      ctx.fillStyle = C.faint; ctx.fillText(o.axis ? o.axis(v) : compact(v), L - 7, y);
+    }
+    const bw = pw / items.length, y0 = Y(Math.min(Math.max(0, lo), hi));
+    items.forEach((it, i) => {
+      if (!it.v) return;
+      const inner = bw > 5 ? bw * 0.74 : Math.max(1, bw - (bw > 2 ? 0.5 : 0));
+      const x = L + i * bw + (bw - inner) / 2, y = Y(it.v), top = Math.min(y, y0), hh = Math.max(1, Math.abs(y - y0));
+      ctx.globalAlpha = o.hover === i ? 1 : 0.8; ctx.fillStyle = it.color; ctx.fillRect(x, top, inner, hh); ctx.globalAlpha = 1;
+      if (o.hover === i) { ctx.strokeStyle = "rgba(255,255,255,.6)"; ctx.strokeRect(x + 0.5, top + 0.5, Math.max(0, inner - 1), Math.max(0, hh - 1)); }
+    });
+    if (o.hover != null && o.hover >= 0 && !items[o.hover].v) {
+      ctx.fillStyle = "rgba(255,255,255,.06)"; ctx.fillRect(L + o.hover * bw, T, bw, ph);
+    }
+    ctx.fillStyle = C.faint; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    const every = Math.max(1, Math.ceil(items.length * (o.labelW || 36) / pw));
+    items.forEach((it, i) => { if (i % every === 0 && it.label) ctx.fillText(it.label, L + i * bw + bw / 2, h - 7); });
+    cv._bars = { L, bw, items };
+  }
+  function bindBars(cv, name, redraw, onClick) {
+    cv.addEventListener("mousemove", (e) => {
+      const b = cv._bars; if (!b) return;
+      const i = Math.floor((e.clientX - cv.getBoundingClientRect().left - b.L) / b.bw);
+      if (i < 0 || i >= b.items.length) { if (S.hover[name] != null) { S.hover[name] = null; redraw(); } hideTip(); cv.style.cursor = "default"; return; }
+      if (S.hover[name] !== i) { S.hover[name] = i; redraw(); }
+      cv.style.cursor = onClick ? "pointer" : "default";
+      showTip(e, cv._bars.items[i].tip);
+    });
+    cv.addEventListener("mouseleave", () => { S.hover[name] = null; hideTip(); redraw(); });
+    if (onClick) cv.addEventListener("click", () => { const b = cv._bars, i = S.hover[name]; if (b && i != null && b.items[i]) onClick(b.items[i]); });
+  }
+  const groupTip = (title, g) => `<div class="h">${esc(title)}</div>${int(g.n)} trades · WR ${pct(g.win_rate, 1)}<br>neto <b>${sEur(g.net)}</b> · media ${sEur(g.avg)}<br>bruto ${sEur(g.gross)} · comisiones ${eur(g.fees)}<br>PF ${ratio(g.profit_factor)}`;
+
+  function drawDaily() {
+    const cv = $("#cv-day"), m = S.m, items = [];
+    if (m && m.n) {
+      const byKey = new Map(M.groupPeriods(S.filtered, "day", F.tz, baseCapital()).map((g) => [g.key, g]));
+      const seen = new Set(), lastKey = M.dayKey(m.last_ts, F.tz);
+      for (let cur = m.first_ts, guard = 0; guard < 200000; guard++, cur += 43200) {
+        const k = M.dayKey(cur, F.tz);
+        if (!seen.has(k)) {
+          seen.add(k);
+          const g = byKey.get(k), v = g ? g.net : 0, dl = dayLabel(k);
+          items.push({ key: k, label: dl.slice(0, 5), v, color: v >= 0 ? C.green : C.red,
+                       tip: g ? groupTip(dl, g) : `<div class="h">${dl}</div><span class="faint">sin trades</span>` });
+        }
+        if (k === lastKey) break;
+      }
+      const pos = items.filter((i) => i.v > 0).length, neg = items.filter((i) => i.v < 0).length;
+      $("#day-sub").textContent = `${int(items.length)} días · ${int(pos)} positivos · ${int(neg)} negativos`;
+    } else $("#day-sub").textContent = "";
+    drawBars(cv, items, { hover: S.hover.day, labelW: 44 });
+  }
+  function drawHist() {
+    const cv = $("#cv-hist"), items = [];
+    const n = S.filtered.length;
+    if (n) {
+      const hs = M.histogram(S.filtered.map((t) => t.pnl), 48);
+      hs.counts.forEach((c, i) => {
+        const a = hs.edges[i], b = hs.edges[i + 1], mid = (a + b) / 2;
+        let extra = "";
+        if (i === 0 && hs.clippedLo) extra = `<br><span class="faint">incluye ${int(hs.clippedLo)} trades por debajo de ${eur(a)}</span>`;
+        if (i === hs.counts.length - 1 && hs.clippedHi) extra = `<br><span class="faint">incluye ${int(hs.clippedHi)} trades por encima de ${eur(b)}</span>`;
+        items.push({ label: compact(a), v: c, color: mid >= 0 ? C.green : C.red, range: [i === 0 && hs.clippedLo ? null : a, i === hs.counts.length - 1 && hs.clippedHi ? null : b],
+                     tip: `<div class="h">P&amp;L ${eur(a)} … ${eur(b)}</div><b>${int(c)}</b> trades · ${pct(c / n * 100, 1)}${extra}` });
+      });
+      $("#hist-sub").textContent = `media ${eur(S.m.expectancy, 2, true)} · mediana ${eur(S.m.median_pnl, 2, true)}`;
+    } else $("#hist-sub").textContent = "";
+    drawBars(cv, items, { hover: S.hover.hist, axis: (v) => int(v), labelW: 48 });
+  }
+  const BAR_METRICS = {
+    net: { l: "P&L neto", v: (g) => g.net, color: (v) => (v >= 0 ? C.green : C.red), axis: compact },
+    n: { l: "Nº de trades", v: (g) => g.n, color: () => C.cyan, axis: (v) => compact(v) },
+    wr: { l: "Win rate %", v: (g) => g.win_rate || 0, color: () => C.amber, axis: (v) => num(v, 0) },
+    avg: { l: "Media por trade", v: (g) => g.avg || 0, color: (v) => (v >= 0 ? C.green : C.red), axis: compact },
+    fees: { l: "Comisiones", v: (g) => g.fees, color: () => C.amber, axis: compact },
+    bps: { l: "Neto en pb", v: (g) => g.net_bps || 0, color: (v) => (v >= 0 ? C.green : C.red), axis: (v) => num(v, 1) },
+  };
+  function drawGrouped(cv, groups, metricKey, hover, titleOf) {
+    const met = BAR_METRICS[metricKey] || BAR_METRICS.net;
+    const items = S.filtered.length ? groups.map((g) => { const v = met.v(g); return { key: g.key, label: g.label, v, color: met.color(v), tip: groupTip(titleOf(g), g) }; }) : [];
+    drawBars(cv, items, { hover, axis: met.axis, labelW: 30 });
+  }
+  function drawHour() {
+    drawGrouped($("#cv-hour"), M.byHour(S.filtered, F.tz).map((g) => Object.assign(g, { label: String(g.key).padStart(2, "0") })),
+                S.metric.hour, S.hover.hour, (g) => `${String(g.key).padStart(2, "0")}:00 – ${String(g.key).padStart(2, "0")}:59 (${tzName()})`);
+  }
+  function drawWd() {
+    drawGrouped($("#cv-wd"), M.byWeekday(S.filtered, F.tz), S.metric.wd, S.hover.wd, (g) => WD_LONG[g.key]);
+  }
+  function bindCharts() {
+    bindEquity();
+    bindBars($("#cv-day"), "day", drawDaily, (it) => change(() => {
+      const [a, b] = M.periodRange("day", it.key, F.tz); F.preset = "custom"; F.from = a; F.to = b; F.tf = "exit";
+    }));
+    bindBars($("#cv-hist"), "hist", drawHist, (it) => change(() => { F.r.pnl = it.range.slice(); }));
+    bindBars($("#cv-hour"), "hour", drawHour, (it) => change(() => { F.hf = F.ht = +it.key; }));
+    bindBars($("#cv-wd"), "wd", drawWd, (it) => change(() => { F.wd = [+it.key]; }));
+  }
+
+  // ── datos en vivo ────────────────────────────────────────────────────────
+  async function fetchTrades(full) {
+    const since = full ? 0 : S.total;
+    const res = await fetch("/api/trades?since=" + since, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const body = await res.json();
+    const reset = full || body.boot !== S.boot || body.since !== since;
+    const e = M.enrich(M.fromRows(body.fields, body.rows));
+    if (reset) { S.all = e.trades; S.dropped = e.dropped; S.byId = new Map(); }
+    else { for (const t of e.trades) S.all.push(t); S.dropped += e.dropped; }
+    for (const t of e.trades) S.byId.set(t.id, t);
+    S.boot = body.boot; S.total = body.total; S.startEquity = body.starting_equity;
+    return { reset, added: e.trades.length };
+  }
+  function renderLive() {
+    const el = $("#live-st"), t = $("#live-t"), hh = (ms) => new Date(ms).toLocaleTimeString("es-ES", { hour12: false });
+    el.classList.toggle("on", S.live && !S.err && S.loaded);
+    el.classList.toggle("err", !!S.err);
+    if (S.err) t.textContent = "sin conexión" + (S.lastOk ? " · último dato " + hh(S.lastOk) : "");
+    else if (!S.loaded) t.textContent = "conectando…";
+    else t.textContent = (S.live ? "en vivo · " : "pausado · ") + hh(S.lastOk);
+    el.title = S.err ? "Error al leer /api/trades: " + S.err + ". Se reintenta cada 5 s." : "Se consultan los trades nuevos cada 5 s.";
+    $("#btn-live").textContent = S.live ? "Pausar" : "Reanudar";
+  }
+  async function tick() {
+    if (S.polling) return;
+    S.polling = true;
+    try {
+      const r = await fetchTrades(!S.loaded);
+      S.err = null; S.lastOk = Date.now();
+      if (!S.loaded) {
+        S.loaded = true;
+        buildDataControls(); renderAccount(); syncInputs(); apply();
+        $("#loading").classList.add("off");
+      } else if (r.reset || r.added) {
+        buildDataControls(); renderAccount(); syncInputs(); apply(true);
+        const box = $("#count-box"); box.classList.remove("flash"); void box.offsetWidth; box.classList.add("flash");
+      } else if (ROLLING.has(F.preset) && Date.now() - S.lastApply > 60000) {
+        apply(true);                                  // la ventana móvil avanza aunque no haya trades nuevos
+      }
+    } catch (e) {
+      S.err = String((e && e.message) || e);
+      if (!S.loaded) $("#load-err").textContent = "No se pudo leer /api/trades (" + S.err + "). Reintentando cada 5 s…";
+    } finally {
+      S.polling = false; renderLive();
+    }
+  }
+
+  // ── arranque ─────────────────────────────────────────────────────────────
+  S.cols = loadCols();
+  buildStaticControls();
+  readHash();
+  bindControls();
+  bindCharts();
+  syncInputs(); renderHead(); paintRows(); drawCharts(); renderLive();
+  tick();
+  setInterval(() => { if (S.live && !document.hidden) tick(); }, POLL_MS);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && S.live) tick(); });
+})();
+</script>
+</body>
+</html>

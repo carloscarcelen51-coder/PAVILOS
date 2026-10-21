@@ -30,6 +30,9 @@ class Fill:
     kind: str          # "entry" | "stop" | "close"
 
 
+DEFAULT_SYMBOL = "BTC/USD"
+
+
 @dataclass(slots=True, frozen=True)
 class Trade:
     side: str            # "LONG" | "SHORT"
@@ -42,6 +45,7 @@ class Trade:
     fee: float           # entry_fee + exit_fee
     return_pct: float    # pnl / (entry*size) * 100
     reason: str          # "stop" | "close"
+    symbol: str = DEFAULT_SYMBOL   # traded pair; log lines written before it existed are BTC/USD
 
 
 class PaperBroker:
@@ -52,9 +56,10 @@ class PaperBroker:
 
     def __init__(self, *, starting_equity: float, taker_fee: float = 0.0005,
                  maker_fee: float = 0.0002, funding_rate_hourly: float = 0.0,
-                 on_trade=None) -> None:
+                 on_trade=None, symbol: str = DEFAULT_SYMBOL) -> None:
         if starting_equity <= 0:
             raise ValueError("starting_equity must be positive")
+        self._symbol = symbol                     # stamped on every Trade
         self._equity = starting_equity            # realized cash
         self._taker = taker_fee
         self._maker = maker_fee
@@ -177,7 +182,8 @@ class PaperBroker:
         net = gross - self._entry_fee - exit_fee
         trade = Trade(side=pos.side, size=pos.size, entry=pos.entry, exit=price,
                       entry_ts=self._entry_ts, exit_ts=ts, pnl=net, fee=self._entry_fee + exit_fee,
-                      return_pct=(net / notional * 100.0) if notional else 0.0, reason=kind)
+                      return_pct=(net / notional * 100.0) if notional else 0.0, reason=kind,
+                      symbol=self._symbol)
         self._trades.append(trade)
         # Close atomically BEFORE notifying: clear position state first so a failing
         # on_trade callback (e.g. disk error during persistence) can neither leave a
