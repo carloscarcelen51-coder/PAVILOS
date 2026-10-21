@@ -82,8 +82,8 @@ del 2026-10-17, con evidencia completa en [`docs/analisis/2026-10-17-informes-pa
 
 ## ⚪ Menores (decisión del operador)
 
-24. **Enlace a `/trades` desde el panel en vivo.** La pestaña de trades enlaza al panel, pero el panel no enlaza a la
-    pestaña, porque se pidió no tocar `index.html`. Añadirlo es una línea en su cabecera.
+24. ✅ **Enlace a `/trades` desde el panel en vivo** (hecho el 21-10, a petición del operador): las dos páginas llevan
+    en la cabecera las pestañas «Panel en vivo» y «Trades históricos». Es el único cambio en `index.html`.
 25. **Moneda de los importes.** El panel en vivo pinta el P&L en €, pero el broker modela un perpetuo lineal en USD
     (PF_XBTUSD) y los precios son BTC/USD: los importes son dólares. `/trades` usa € por coherencia con el panel.
     Para corregirlo hay que cambiar las dos páginas a la vez.

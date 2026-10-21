@@ -141,6 +141,13 @@ def test_trades_page_and_its_script_are_served():
     assert "TradesMetrics" in js.text
 
 
+def test_live_page_and_trades_page_link_to_each_other():
+    client = TestClient(create_app(DashboardState()))
+    live = client.get("/").text
+    assert '<a href="/trades"' in live and "Trades históricos" in live
+    assert '<a href="/">Panel en vivo</a>' in client.get("/trades").text
+
+
 def test_main_page_is_served_byte_for_byte_from_index_html():
     html = TestClient(create_app(DashboardState())).get("/").text
     assert html == (STATIC / "index.html").read_text(encoding="utf-8")

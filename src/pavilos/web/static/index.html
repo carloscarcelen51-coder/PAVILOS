@@ -107,6 +107,16 @@
   }
   .live.stale .pip { background:var(--amber); animation:none; box-shadow:0 0 9px var(--amber); }
 
+  /* page tabs: live panel ↔ trade history (/trades) */
+  .tabs { display:flex; align-items:stretch; }
+  .tabs a {
+    display:flex; align-items:center; padding:0 18px; border-right:1px solid var(--rule);
+    font-size:10.5px; font-weight:600; letter-spacing:2.2px; text-transform:uppercase;
+    color:var(--ink-dim); text-decoration:none; border-bottom:2px solid transparent; white-space:nowrap;
+  }
+  .tabs a:hover { color:var(--ink); background:rgba(255,255,255,.02); }
+  .tabs a.on { color:var(--amber); border-bottom-color:var(--amber); background:linear-gradient(180deg,transparent,rgba(227,162,60,.07)); }
+
   .px {
     display:flex; flex-direction:column; justify-content:center;
     padding:0 26px; border-right:1px solid var(--rule);
@@ -409,6 +419,11 @@
           <span class="pip"></span><span id="live-label">live</span>
         </div>
       </div>
+
+      <nav class="tabs">
+        <a href="/" class="on" aria-current="page">Panel en vivo</a>
+        <a href="/trades" title="Historial completo de trades: filtros, métricas, gráficos y CSV">Trades históricos</a>
+      </nav>
 
       <div class="px">
         <span class="lbl">BTC mid</span>
