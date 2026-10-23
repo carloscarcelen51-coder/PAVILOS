@@ -326,7 +326,8 @@ test("CSV en formato español y estándar", () => {
   const b = M.runningBalances(tr, 1000);
   const es = M.toCSV(tr, b, "utc", "es").split("\r\n");
   assert.equal(es[0].split(";")[0], "id");
-  assert.equal(es[0].split(";").length, 18);
+  assert.equal(es[0].split(";").length, 23);
+  assert.equal(es[1].split(";").length, 23);
   const row = es[1].split(";");
   assert.equal(row[0], "7");
   assert.equal(row[3], "2026-10-21 17:04:59.000");
@@ -335,6 +336,70 @@ test("CSV en formato español y estándar", () => {
   assert.equal(es[2], "");                  // termina en salto de línea
   const std = M.toCSV(tr, b, "utc", "std").split("\r\n");
   assert.equal(std[1].split(",")[13], "-1.500000");
+});
+
+test("normalizar el tamaño: mismos pb, importes a 10.000 € y los registrados se conservan", () => {
+  const tr = M.enrich([
+    raw(0, -1.5, 100, { entry: 50000, size: 0.001, fee: 0.05 }),     // 50 € de nocional
+    raw(1, 30, 200, { entry: 50000, size: 1.0, fee: 50 }),          // 50.000 € de nocional
+  ]).trades;
+  const n = M.normalize(tr, 10000);
+  close(n[0].notional, 10000); close(n[1].notional, 10000);
+  close(n[0].pnl, -1.5 * 200); close(n[0].fee, 0.05 * 200); close(n[1].pnl, 30 / 5);
+  close(n[0].size, 0.2);
+  assert.equal(n[0].return_pct, tr[0].return_pct);
+  assert.equal(n[0].move_bps, tr[0].move_bps);
+  close(n[0].pnl_real, -1.5); close(n[1].notional_real, 50000);
+  assert.equal(tr[0].pnl, -1.5);                        // el original no se toca
+  const r = M.compute(n, 10000, "utc");
+  close(r.net_bps, (n[0].pnl + n[1].pnl) / 20000 * 1e4);
+});
+
+test("contexto de entrada: campos de primer nivel y filtros que exigen contexto", () => {
+  const tr = M.enrich([
+    raw(0, 1, 100, { context: { stop_bps: 54.5, room_bps: 12.0, zone_conf: 0.91 } }),
+    raw(1, 1, 200, { context: { stop_bps: 30.0, room_bps: 40.0, zone_conf: 0.7 } }),
+    raw(2, 1, 300),                                                    // anterior al 23-10: sin contexto
+  ]).trades;
+  assert.equal(tr[0].stop_bps, 54.5); assert.equal(tr[1].room_bps, 40.0); assert.equal(tr[2].ctx, null);
+  assert.equal(tr[2].room_bps, null);
+  const ids = (f) => M.applyFilters(tr, f).map((t) => t.id);
+  assert.deepEqual(ids({}), [0, 1, 2]);
+  assert.deepEqual(ids({ roomMin: 20 }), [1]);
+  assert.deepEqual(ids({ stopMax: 50 }), [1]);
+  assert.deepEqual(ids({ notBefore: 150 - 10 }), [1, 2]);            // entrada = salida - 10 s
+});
+
+test("sesiones: cada trade a su arranque y resumen con el nocional registrado", () => {
+  const starts = [1000, 5000, 9000];
+  assert.equal(M.runIndex(starts, 999), -1);
+  assert.equal(M.runIndex(starts, 1000), 0);
+  assert.equal(M.runIndex(starts, 4999), 0);
+  assert.equal(M.runIndex(starts, 5000), 1);
+  assert.equal(M.runIndex(starts, 1e9), 2);
+  assert.equal(M.runIndex([], 5), -1);
+  const tr = M.enrich([
+    raw(0, -5, 1100, { size: 0.2 }), raw(1, -3, 1200, { size: 0.1 }),   // sesión 0: el tamaño baja
+    raw(2, 2, 6000), raw(3, 0, 500),                                     // sesión 1 y una anterior
+  ]).trades;
+  const g = M.groupRuns(tr, starts);
+  assert.deepEqual(g.map((x) => x.run), [-1, 0, 1]);
+  const s0 = g[1];
+  assert.equal(s0.n, 2); close(s0.pnl_real, -8); assert.equal(s0.start, 1000);
+  close(s0.notional_first, (0.2 * 50000 + 0.1 * 50000) / 2);
+  assert.equal(g[0].start, null);
+});
+
+test("ratios diarios solo con los días en marcha", () => {
+  // trades el 1 y el 4 de octubre; con el programa parado el 2 y el 3
+  const tr = M.enrich([raw(0, 10, U(2026, 10, 1, 12)), raw(1, -4, U(2026, 10, 4, 12))]).trades;
+  const all = M.compute(tr, 1000, "utc");
+  assert.equal(all.calendar_days, 4); assert.equal(all.days_basis, "calendar");
+  const act = M.compute(tr, 1000, "utc", { activeDays: new Set(["2026-10-01", "2026-10-04"]) });
+  assert.equal(act.calendar_days, 2); assert.equal(act.days_basis, "active");
+  close(act.sharpe, M.mean([10, -4]) / M.std([10, -4]) * Math.sqrt(365));
+  const arr = M.compute(tr, 1000, "utc", { activeDays: ["2026-10-01", "2026-10-02", "2026-10-04"] });
+  assert.equal(arr.calendar_days, 3);
 });
 
 test("zona local: el cambio de hora no salta ni repite días (TZ del proceso)", () => {

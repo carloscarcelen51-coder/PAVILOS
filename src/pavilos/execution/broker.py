@@ -44,8 +44,9 @@ class Trade:
     pnl: float           # NET realized = gross price P&L - entry_fee - exit_fee (excludes funding)
     fee: float           # entry_fee + exit_fee
     return_pct: float    # pnl / (entry*size) * 100
-    reason: str          # "stop" | "close"
+    reason: str          # "stop" | "close" | "restart" (open when the process died; closed at the next price)
     symbol: str = DEFAULT_SYMBOL   # traded pair; log lines written before it existed are BTC/USD
+    context: dict | None = None    # what the strategy saw when it armed the entry (None before 2026-10-23)
 
 
 class PaperBroker:
@@ -56,10 +57,13 @@ class PaperBroker:
 
     def __init__(self, *, starting_equity: float, taker_fee: float = 0.0005,
                  maker_fee: float = 0.0002, funding_rate_hourly: float = 0.0,
-                 on_trade=None, symbol: str = DEFAULT_SYMBOL) -> None:
+                 on_trade=None, symbol: str = DEFAULT_SYMBOL, on_state=None) -> None:
         if starting_equity <= 0:
             raise ValueError("starting_equity must be positive")
         self._symbol = symbol                     # stamped on every Trade
+        self._on_state = on_state                 # called with export_state() after every entry and exit
+        self._entry_context: dict | None = None
+        self._restart_close = False               # a restored open position closes at the next price
         self._equity = starting_equity            # realized cash
         self._taker = taker_fee
         self._maker = maker_fee
@@ -75,7 +79,8 @@ class PaperBroker:
         self._entry_ts = 0.0
 
     # --- order management -------------------------------------------------
-    def place_entry(self, side: str, *, trigger: float, stop: float, size: float) -> None:
+    def place_entry(self, side: str, *, trigger: float, stop: float, size: float,
+                    context: dict | None = None) -> None:
         if side not in ("LONG", "SHORT"):
             raise ValueError(f"bad side {side!r}")
         if self._position is not None or self._pending is not None:
@@ -88,9 +93,10 @@ class PaperBroker:
             raise ValueError("LONG stop must be below trigger")
         if side == "SHORT" and not (stop > trigger):
             raise ValueError("SHORT stop must be above trigger")
-        self._pending = {"side": side, "trigger": trigger, "stop": stop, "size": size}
+        self._pending = {"side": side, "trigger": trigger, "stop": stop, "size": size, "context": context}
 
-    def enter_market(self, side: str, *, stop: float, size: float, ts: float) -> None:
+    def enter_market(self, side: str, *, stop: float, size: float, ts: float,
+                     context: dict | None = None) -> None:
         """Open a position IMMEDIATELY at the current price (for mean-reversion entries
         that fill at the support, not on a stop above it). Fills at ``_last_price``."""
         if side not in ("LONG", "SHORT"):
@@ -106,7 +112,7 @@ class PaperBroker:
             raise ValueError("LONG stop must be below the entry price")
         if side == "SHORT" and not (stop > price):
             raise ValueError("SHORT stop must be above the entry price")
-        self._open(side, price, stop, size, ts)
+        self._open(side, price, stop, size, ts, context)
 
     def cancel_entry(self) -> None:
         self._pending = None
@@ -125,13 +131,21 @@ class PaperBroker:
     def on_price(self, price: float, ts: float) -> None:
         if not math.isfinite(price):
             return
+        if self._restart_close:
+            # A position restored from before a restart: what the price did while the
+            # process was down is unknown, so it is closed at the first price seen now.
+            self._restart_close = False
+            if self._position is not None:
+                self._close_at(price, ts, "restart")
+                self._last_price = price
+                return
         self._apply_funding(price, ts)
         if self._pending is not None:
             d = self._pending
             triggered = price >= d["trigger"] if d["side"] == "LONG" else price <= d["trigger"]
             if triggered:
-                self._open(d["side"], price, d["stop"], d["size"], ts)
                 self._pending = None
+                self._open(d["side"], price, d["stop"], d["size"], ts, d.get("context"))
         if self._position is not None:
             p = self._position
             hit = price <= p.stop if p.side == "LONG" else price >= p.stop
@@ -161,7 +175,8 @@ class PaperBroker:
         return list(self._trades)
 
     # --- internals --------------------------------------------------------
-    def _open(self, side: str, price: float, stop: float, size: float, ts: float) -> None:
+    def _open(self, side: str, price: float, stop: float, size: float, ts: float,
+              context: dict | None = None) -> None:
         fee = size * price * self._taker
         self._equity -= fee
         self._position = Position(side, size, price, stop)
@@ -170,6 +185,8 @@ class PaperBroker:
         self._fills.append(Fill(ts, side, price, size, fee, "entry"))
         self._entry_fee = fee
         self._entry_ts = ts
+        self._entry_context = context
+        self._notify_state()
 
     def _close_at(self, price: float, ts: float, kind: str) -> None:
         pos = self._position
@@ -183,7 +200,7 @@ class PaperBroker:
         trade = Trade(side=pos.side, size=pos.size, entry=pos.entry, exit=price,
                       entry_ts=self._entry_ts, exit_ts=ts, pnl=net, fee=self._entry_fee + exit_fee,
                       return_pct=(net / notional * 100.0) if notional else 0.0, reason=kind,
-                      symbol=self._symbol)
+                      symbol=self._symbol, context=self._entry_context)
         self._trades.append(trade)
         # Close atomically BEFORE notifying: clear position state first so a failing
         # on_trade callback (e.g. disk error during persistence) can neither leave a
@@ -192,11 +209,61 @@ class PaperBroker:
         # price-driven trading path or strand the broker in a half-updated state.
         self._position = None
         self._funding_anchor_ts = None
+        self._entry_context = None
         if self._on_trade is not None:
             try:
                 self._on_trade(trade)
             except Exception:
                 _log.exception("on_trade callback failed; trade recorded, position closed")
+        # After the trade is logged: dying in between leaves the position in the saved
+        # state, and Runtime.build() then finds it already in the log (no duplicate).
+        self._notify_state()
+
+    # --- state across restarts --------------------------------------------
+    def export_state(self) -> dict:
+        """Realized cash and the open position (the pending entry is not kept: an order
+        that has not filled is simply re-armed by the strategy after a restart)."""
+        pos = self._position
+        return {
+            "equity": self._equity,
+            "position": None if pos is None else {
+                "side": pos.side, "size": pos.size, "entry": pos.entry, "stop": pos.stop,
+                "entry_ts": self._entry_ts, "entry_fee": self._entry_fee, "context": self._entry_context,
+            },
+        }
+
+    def restore(self, *, equity: float, position: dict | None = None) -> None:
+        """Continue a paper account after a restart: its realized cash (any finite value:
+        a fixed-notional paper account can go below zero) and the position that was open
+        when the process died, which is closed at the FIRST price seen (reason "restart")."""
+        if not math.isfinite(equity):
+            raise ValueError("restore: equity must be finite")
+        if self._position is not None or self._pending is not None:
+            raise RuntimeError("restore() must run before trading starts")
+        restored = None
+        if position:
+            side = position["side"]
+            size, entry, stop = float(position["size"]), float(position["entry"]), float(position["stop"])
+            if side not in ("LONG", "SHORT") or not all(math.isfinite(x) for x in (size, entry, stop)) \
+                    or size <= 0 or entry <= 0:
+                raise ValueError(f"restore: invalid position {position!r}")
+            restored = Position(side, size, entry, stop)
+        self._equity = equity
+        if restored is not None:
+            self._position = restored
+            self._last_price = restored.entry       # no unrealized P&L until a real price arrives
+            self._entry_ts = float(position["entry_ts"])
+            self._entry_fee = float(position.get("entry_fee", 0.0))
+            self._entry_context = position.get("context")
+            self._restart_close = True
+
+    def _notify_state(self) -> None:
+        if self._on_state is None:
+            return
+        try:
+            self._on_state(self.export_state())
+        except Exception:
+            _log.exception("on_state callback failed; paper account state not saved")
 
     def _apply_funding(self, price: float, ts: float) -> None:
         if self._position is None or self._funding_anchor_ts is None or self._funding == 0.0:

@@ -12,11 +12,13 @@ from dataclasses import dataclass, field
 from pavilos.aggregator.aggregator import Aggregator
 from pavilos.aggregator.normalize import PegProvider
 from pavilos.core.engine import Engine
+from pavilos.connectors.peg_feed import PegFeed
 from pavilos.connectors.venues import VENUE_SPECS, build_connector
 from pavilos.detection.detector import Detector
 from pavilos.signals.atr import ATR
 from pavilos.signals.engine import SignalEngine
 from pavilos.execution.broker import PaperBroker
+from pavilos.execution.paper_state import PaperState
 from pavilos.execution.trade_log import TradeLog, summarize
 from pavilos.core.trading_engine import TradingEngine
 from pavilos.web.state import DashboardState
@@ -91,6 +93,15 @@ class RuntimeConfig:
     pending_timeout_s: float = 10.0    # cancel a pending entry that has not filled in this long
     entry_mode: str = "momentum"       # "momentum" (default, breakout) | "reversion" (bounce at support)
     tp_mult: float = 2.0               # reversion take-profit at tp_mult x risk distance
+    # paper account (since 2026-10-23, so its results are comparable and survive restarts)
+    fixed_notional: float | None = 10_000.0   # every trade has this notional (EUR) whatever the equity;
+                                              # None = risk_pct of equity capped by max_leverage (shrank
+                                              # trades to dust as each session's account drained)
+    paper_state_path: str | None = None       # cash + open position kept across restarts; __main__ sets it
+                                              # (None here so tests never read or write the live file)
+    # USDT/USDC -> USD from Kraken into the aggregator (was fixed at 1.0; USDT ~ -12 bp)
+    peg_live: bool = True
+    peg_interval_s: float = 30.0
     # raw-L2 data layer. Recording is ON, writing ONLY inside this new D: folder
     # (never touches other files on D:). Lossless compact encoding (M17): GB/day measured after deploy.
     book_data_dir: str | None = r"D:\pavilos_book_data"
@@ -105,7 +116,7 @@ class RuntimeConfig:
 class Runtime:
     def __init__(self, engine: Engine, trading_engine: TradingEngine,
                  state: DashboardState, config: RuntimeConfig,
-                 all_trades, trade_log, recorder=None) -> None:
+                 all_trades, trade_log, recorder=None, peg_feed: PegFeed | None = None) -> None:
         self.engine = engine
         self.trading_engine = trading_engine
         self.state = state
@@ -113,14 +124,18 @@ class Runtime:
         self.all_trades = all_trades
         self.trade_log = trade_log
         self.recorder = recorder
+        self.peg_feed = peg_feed
 
     @classmethod
     def build(cls, config: RuntimeConfig, *,
               connector_factory: Callable[[str, str], object] = build_connector,
               now: Callable[[], float] = _wall_now) -> "Runtime":
         connectors = [connector_factory(v, config.symbols[v]) for v in config.symbols]
-        agg = Aggregator(list(VENUE_SPECS), PegProvider(), bin_bps=config.bin_bps,
+        peg = PegProvider()
+        agg = Aggregator(list(VENUE_SPECS), peg, bin_bps=config.bin_bps,
                          window_bps=config.window_bps, staleness_s=config.staleness_s)
+        peg_feed = (PegFeed(peg, lake_dir=config.book_data_dir, interval_s=config.peg_interval_s)
+                    if config.peg_live else None)
         recorder = None
         if config.book_data_dir:
             from pavilos.persistence.parquet_sink import ParquetSink
@@ -143,7 +158,8 @@ class Runtime:
                               opposing_distance_bps=config.opposing_distance_bps, risk_pct=config.risk_pct,
                               max_leverage=config.max_leverage, entry_zone_bps=config.entry_zone_bps,
                               pending_timeout_s=config.pending_timeout_s,
-                              entry_mode=config.entry_mode, tp_mult=config.tp_mult)
+                              entry_mode=config.entry_mode, tp_mult=config.tp_mult,
+                              fixed_notional=config.fixed_notional)
         trade_log = TradeLog(config.trade_log_path)
         all_trades = trade_log.load()
 
@@ -161,7 +177,31 @@ class Runtime:
             except Exception:
                 _log.exception("failed to persist trade to %s", config.trade_log_path)
 
-        broker = PaperBroker(starting_equity=config.starting_equity, on_trade=_on_trade)
+        paper_state = PaperState(config.paper_state_path) if config.paper_state_path else None
+
+        def _on_state(snapshot: dict) -> None:
+            try:
+                paper_state.save(snapshot)
+            except Exception:
+                _log.exception("failed to save the paper account to %s", config.paper_state_path)
+
+        broker = PaperBroker(starting_equity=config.starting_equity, on_trade=_on_trade,
+                             on_state=(_on_state if paper_state is not None else None))
+        if paper_state is not None:
+            saved = paper_state.load()
+            if saved is not None:
+                pos = saved["position"]
+                if pos is not None and any(t.entry_ts == pos.get("entry_ts") for t in all_trades[-20:]):
+                    # it died after logging the close but before saving the state: already a trade
+                    pos = None
+                try:
+                    broker.restore(equity=saved["equity"], position=pos)
+                    _log.info("paper account continued: equity %.2f%s", saved["equity"],
+                              f"; the {pos['side']} position open at the restart closes at the first price"
+                              if pos else "")
+                except Exception:
+                    _log.exception("paper account in %s not restored; starting from %.2f",
+                                   config.paper_state_path, config.starting_equity)
         state = DashboardState()
 
         def observer(snapshot, analysis, brk) -> None:
@@ -175,7 +215,7 @@ class Runtime:
                          recording=(recorder.status() if recorder is not None else None))
 
         trading_engine = TradingEngine(detector, ATR(window=config.atr_window), signal, broker, observer=observer)
-        return cls(engine, trading_engine, state, config, all_trades, trade_log, recorder)
+        return cls(engine, trading_engine, state, config, all_trades, trade_log, recorder, peg_feed)
 
     async def _supervise_trading(self, stop: "asyncio.Event", *, restart_delay: float = 1.0) -> None:
         """Run TradingEngine.run; on a crash-loud exception, log and restart until stop."""
@@ -229,15 +269,22 @@ class Runtime:
 
     def web_app(self):
         """Dashboard app: live state at / and the all-time trade history at /trades."""
+        import os
         from pavilos.web.server import create_app
+        cfg = self.config
         return create_app(self.state, trades=lambda: self.all_trades,
-                          starting_equity=self.config.starting_equity)
+                          starting_equity=cfg.starting_equity,
+                          ref_notional=cfg.fixed_notional or 10_000.0,
+                          runs_file=os.path.join(cfg.book_data_dir, "_runs.jsonl") if cfg.book_data_dir else None)
 
     async def run_app(self, stop: "asyncio.Event | None" = None) -> None:
         import uvicorn
         stop = stop or asyncio.Event()
         asyncio.get_running_loop().set_exception_handler(_loop_exception_handler)
         janitor = self._start_recording() if self.recorder is not None else None
+        # Live USDT/USDC rates: its first reading lands within a second, long before any
+        # zone is persistent enough to trade; it never blocks the recorder's start.
+        pegging = asyncio.create_task(self.peg_feed.run(stop)) if self.peg_feed is not None else None
         await self.engine.start()
         # log_config=None: uvicorn logs through OUR handlers (logs/pavilos.log) instead of
         # installing its own stderr handlers, which would bypass the rotating file.
@@ -254,6 +301,7 @@ class Runtime:
             await self.engine.stop()
             if self.recorder is not None:
                 self._stop_recording(janitor)
-            for t in (trading, serving):
+            tasks = [t for t in (trading, serving, pegging) if t is not None]
+            for t in tasks:
                 t.cancel()
-            await asyncio.gather(trading, serving, return_exceptions=True)
+            await asyncio.gather(*tasks, return_exceptions=True)

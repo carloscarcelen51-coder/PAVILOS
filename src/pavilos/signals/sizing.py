@@ -22,3 +22,12 @@ def position_size(equity: float, *, entry: float, stop: float,
     if not (math.isfinite(size) and math.isfinite(max_size)):
         return 0.0
     return max(0.0, min(size, max_size))
+
+
+def fixed_notional_size(notional: float, *, entry: float) -> float:
+    """Units for a FIXED notional (``notional / entry``), whatever the equity: every
+    paper trade then weighs the same, so results compare across trades and restarts and a
+    draining account cannot shrink trades to dust. 0.0 on a non-positive/non-finite input."""
+    if not (math.isfinite(notional) and math.isfinite(entry)) or notional <= 0 or entry <= 0:
+        return 0.0
+    return notional / entry

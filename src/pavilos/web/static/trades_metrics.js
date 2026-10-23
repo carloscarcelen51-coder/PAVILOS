@@ -150,18 +150,74 @@
           !isNum(t.entry_ts) || !isNum(t.exit_ts) || !isNum(t.size)) { dropped++; continue; }
       var fee = isNum(t.fee) ? t.fee : 0;
       var dir = t.side === "SHORT" ? -1 : 1;
+      var ctx = t.context && typeof t.context === "object" ? t.context : null;
+      var cnum = function (k) { return ctx && isNum(ctx[k]) ? ctx[k] : null; };
+      var notional = t.entry * t.size;
       out.push({
         id: t.id, symbol: t.symbol || "BTC/USD", side: t.side, reason: t.reason || "",
         size: t.size, entry: t.entry, exit: t.exit, entry_ts: t.entry_ts, exit_ts: t.exit_ts,
         pnl: t.pnl, fee: fee, return_pct: isNum(t.return_pct) ? t.return_pct : 0,
         gross: t.pnl + fee,                                   // antes de comisiones (sin funding)
-        notional: t.entry * t.size,
+        notional: notional,
+        // importes tal como se registraron (normalize() los conserva aquí)
+        pnl_real: t.pnl, fee_real: fee, gross_real: t.pnl + fee, notional_real: notional, size_real: t.size,
         move_bps: t.entry ? dir * (t.exit - t.entry) / t.entry * 1e4 : 0,   // a favor del lado
         duration: Math.max(0, t.exit_ts - t.entry_ts),
         result: t.pnl > 0 ? "win" : (t.pnl < 0 ? "loss" : "flat"),
+        ctx: ctx,                                             // contexto de entrada (desde el 23-10)
+        stop_bps: cnum("stop_bps"), room_bps: cnum("room_bps"), zone_conf: cnum("zone_conf"),
       });
     }
     return { trades: out, dropped: dropped };
+  }
+
+  // Cada trade como si hubiera sido de `notional` (el P&L en pb no cambia). Hasta el 23-10 el
+  // paper dimensionaba con el 1 % del capital de cada sesión, que se iba gastando: tamaños de
+  // 4 € a 96.000 € que no se pueden sumar ni comparar. Devuelve copias; los importes
+  // registrados siguen en *_real.
+  function normalize(trades, notional) {
+    var out = new Array(trades.length);
+    for (var i = 0; i < trades.length; i++) {
+      var t = trades[i], f = t.notional_real > 0 ? notional / t.notional_real : 0;
+      var c = {};
+      for (var k in t) if (Object.prototype.hasOwnProperty.call(t, k)) c[k] = t[k];
+      c.pnl = t.pnl_real * f; c.fee = t.fee_real * f; c.gross = t.gross_real * f;
+      c.notional = t.notional_real * f; c.size = t.size_real * f;
+      out[i] = c;
+    }
+    return out;
+  }
+
+  // Índice del último arranque <= ts en una lista ordenada de arranques (-1 si es anterior).
+  function runIndex(starts, ts) {
+    var lo = 0, hi = starts.length - 1, ans = -1;
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1;
+      if (starts[mid] <= ts) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return ans;
+  }
+
+  // Resumen por sesión (arranque del programa). Además de lo habitual: el P&L y el nocional
+  // REGISTRADOS al principio y al final de la sesión, que muestran cómo se iba gastando.
+  function groupRuns(trades, starts) {
+    var by = {}, keys = [];
+    var t = trades.slice().sort(byExit);
+    for (var i = 0; i < t.length; i++) {
+      var k = runIndex(starts, t[i].entry_ts);
+      if (!by[k]) { by[k] = []; keys.push(k); }
+      by[k].push(t[i]);
+    }
+    keys.sort(function (a, b) { return a - b; });
+    return keys.map(function (k) {
+      var a = by[k], g = summarizeGroup(k, a), m = Math.min(10, a.length), first = 0, last = 0, real = 0;
+      for (var i = 0; i < a.length; i++) real += a[i].pnl_real;
+      for (i = 0; i < m; i++) { first += a[i].notional_real; last += a[a.length - 1 - i].notional_real; }
+      g.run = k; g.start = k >= 0 ? starts[k] : null;
+      g.first_ts = a[0].entry_ts; g.last_ts = a[a.length - 1].exit_ts;
+      g.pnl_real = real; g.notional_first = first / m; g.notional_last = last / m;
+      return g;
+    });
   }
 
   // ── filtros ──────────────────────────────────────────────────────────────
@@ -176,7 +232,8 @@
 
   // f: { symbol, side, result, reasons[], from, to (epoch s), timeField "exit"|"entry",
   //      pnlMin/Max, retMin/Max, sizeMin/Max, notionalMin/Max, entryMin/Max, durMin/Max (s),
-  //      feeMin/Max, moveMin/Max (pb), hourFrom, hourTo, weekdays[] (0 = lun), tz, text }
+  //      feeMin/Max, moveMin/Max (pb), stopMin/Max, roomMin/Max (pb, contexto de entrada),
+  //      hourFrom, hourTo, weekdays[] (0 = lun), tz, text, notBefore (entrada >= este ts) }
   // Hora y día de la semana se miran en la ENTRADA del trade. reasons/weekdays: null = todos,
   // [] = ninguno. text "#123" busca ese id exacto; cualquier otro texto, por contenido.
   function applyFilters(trades, f) {
@@ -195,6 +252,7 @@
       if (f.side && f.side !== "ALL" && t.side !== f.side) continue;
       if (f.result && f.result !== "ALL" && t.result !== f.result) continue;
       if (reasons && reasons.indexOf(t.reason) < 0) continue;
+      if (f.notBefore != null && t.entry_ts < f.notBefore) continue;
       var ts = t[field];
       if (f.from != null && ts < f.from) continue;
       if (f.to != null && ts > f.to) continue;
@@ -206,6 +264,9 @@
       if (!inRange(t.duration, f.durMin, f.durMax)) continue;
       if (!inRange(t.fee, f.feeMin, f.feeMax)) continue;
       if (!inRange(t.move_bps, f.moveMin, f.moveMax)) continue;
+      // contexto de entrada: con un límite puesto, un trade sin contexto (anterior al 23-10) no entra
+      if ((f.stopMin != null || f.stopMax != null) && (t.stop_bps == null || !inRange(t.stop_bps, f.stopMin, f.stopMax))) continue;
+      if ((f.roomMin != null || f.roomMax != null) && (t.room_bps == null || !inRange(t.room_bps, f.roomMin, f.roomMax))) continue;
       if (needClock) {
         var p = parts(t.entry_ts, tz);
         if (!hourMatches(p.hour, f.hourFrom, f.hourTo)) continue;
@@ -239,8 +300,12 @@
   function byExit(a, b) { return a.exit_ts - b.exit_ts || a.entry_ts - b.entry_ts || a.id - b.id; }
 
   // ── métricas completas ───────────────────────────────────────────────────
-  function compute(trades, startEquity, tz) {
+  // opts.activeDays: claves de día (dayKey) en que el programa estuvo en marcha. Si se da, la
+  // serie diaria de Sharpe/Sortino/volatilidad solo cuenta esos días (un día con el programa
+  // parado no es un día a 0 €); sin ella, cuenta todos los días naturales del periodo.
+  function compute(trades, startEquity, tz, opts) {
     tz = tz || "local";
+    var activeDays = opts && opts.activeDays ? opts.activeDays : null;
     var start = isNum(startEquity) && startEquity > 0 ? startEquity : 10000;
     var t = trades.slice().sort(byExit);
     var n = t.length;
@@ -377,9 +442,11 @@
     r.positive_days_pct = days.length ? pos / days.length * 100 : null;
     r.avg_day = days.length ? r.net / days.length : null;
 
-    // serie diaria CONTINUA (los días sin operaciones cuentan como 0 €) para los ratios
-    var dailyPnl = calendarDailyPnl(days, firstTs, lastTs, tz);
+    // serie diaria CONTINUA (los días sin operaciones cuentan como 0 €; con activeDays, solo
+    // los días con el programa en marcha) para los ratios
+    var dailyPnl = calendarDailyPnl(days, firstTs, lastTs, tz, activeDays);
     r.calendar_days = dailyPnl.length;
+    r.days_basis = activeDays ? "active" : "calendar";
     var md = mean(dailyPnl), sd = std(dailyPnl);
     if (md !== null && sd) {
       r.sharpe = md / sd * Math.sqrt(365);
@@ -405,13 +472,18 @@
   }
 
   // P&L de cada día natural entre la primera entrada y la última salida (0 si no hubo cierres).
-  function calendarDailyPnl(days, firstTs, lastTs, tz) {
-    var byKey = {}, out = [], seen = {};
+  // activeDays (Set o array de claves de día, opcional): solo esos días.
+  function calendarDailyPnl(days, firstTs, lastTs, tz, activeDays) {
+    var byKey = {}, out = [], seen = {}, act = null;
+    if (activeDays) {
+      act = {};
+      (Array.isArray(activeDays) ? activeDays : Array.from(activeDays)).forEach(function (k) { act[k] = 1; });
+    }
     for (var i = 0; i < days.length; i++) byKey[days[i].key] = days[i].net;
     var cursor = firstTs, lastKey = dayKey(lastTs, tz);
     for (var guard = 0; guard < 200000; guard++) {
       var k = dayKey(cursor, tz);
-      if (!seen[k]) { seen[k] = 1; out.push(byKey[k] || 0); }
+      if (!seen[k]) { seen[k] = 1; if (!act || act[k] || byKey[k] != null) out.push(byKey[k] || 0); }
       if (k === lastKey) break;
       cursor += DAY / 2;                    // medio día: robusto ante cambios de hora
     }
@@ -638,14 +710,17 @@
     }
     var head = ["id", "par", "lado", "entrada_" + tz, "salida_" + tz, "duracion_s", "precio_entrada",
                 "precio_salida", "movimiento_pb", "tamano", "nocional", "pnl_bruto", "comision",
-                "pnl_neto", "rentabilidad_pct", "pnl_acumulado", "balance", "motivo"];
+                "pnl_neto", "rentabilidad_pct", "pnl_acumulado", "balance", "motivo",
+                "pnl_neto_registrado", "nocional_registrado", "stop_pb", "espacio_pb", "conf_zona"];
     var lines = [head.join(sep)];
     for (var i = 0; i < trades.length; i++) {
       var x = trades[i], b = balances[x.id] || {};
       lines.push([x.id, x.symbol, x.side, isoTime(x.entry_ts, tz), isoTime(x.exit_ts, tz),
                   num(x.duration, 3), num(x.entry), num(x.exit), num(x.move_bps, 3), num(x.size),
                   num(x.notional, 2), num(x.gross, 6), num(x.fee, 6), num(x.pnl, 6), num(x.return_pct, 6),
-                  num(b.cum, 6), num(b.bal, 6), x.reason].join(sep));
+                  num(b.cum, 6), num(b.bal, 6), x.reason,
+                  num(x.pnl_real != null ? x.pnl_real : x.pnl, 6), num(x.notional_real != null ? x.notional_real : x.notional, 2),
+                  num(x.stop_bps), num(x.room_bps), num(x.zone_conf)].join(sep));
     }
     return lines.join("\r\n") + "\r\n";
   }
@@ -657,6 +732,7 @@
     periodBounds: periodBounds, parseDateInput: parseDateInput, toDateInput: toDateInput,
     isoWeekMonday: isoWeekMonday, periodRange: periodRange, parseNum: parseNum, parseDur: parseDur,
     fromRows: fromRows, enrich: enrich, applyFilters: applyFilters, hourMatches: hourMatches,
+    normalize: normalize, runIndex: runIndex, groupRuns: groupRuns,
     compute: compute, calendarDailyPnl: calendarDailyPnl, sideStats: sideStats,
     summarizeGroup: summarizeGroup, groupBy: groupBy, groupPeriods: groupPeriods,
     byHour: byHour, byWeekday: byWeekday, byDuration: byDuration, durationBucket: durationBucket,

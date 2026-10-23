@@ -23,6 +23,7 @@ logs/
 
 # --- Data / runtime artifacts (never commit market data or secrets) ---
 paper_trades*.jsonl
+paper_state.json*
 book_recording.jsonl
 *.recording.jsonl
 data/

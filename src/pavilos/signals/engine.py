@@ -20,8 +20,15 @@ take-profit is recorded at ``tp_mult`` x the risk distance from entry; the trade
 exits on the next snapshot that reaches that take-profit (or on a broker stop-out)."""
 from __future__ import annotations
 
+import math
+
 from pavilos.detection.models import DepthAnalysis, Zone
-from pavilos.signals.sizing import position_size
+from pavilos.signals.sizing import fixed_notional_size, position_size
+
+
+def _r(x, nd: int):
+    """Round for the trade log; None for a missing or non-finite value."""
+    return round(x, nd) if isinstance(x, (int, float)) and math.isfinite(x) else None
 
 
 class SignalEngine:
@@ -30,7 +37,8 @@ class SignalEngine:
                  stop_offset_bps: float, atr_stop_mult: float, opposing_distance_bps: float,
                  risk_pct: float, max_leverage: float,
                  entry_zone_bps: float, pending_timeout_s: float,
-                 entry_mode: str = "momentum", tp_mult: float = 2.0) -> None:
+                 entry_mode: str = "momentum", tp_mult: float = 2.0,
+                 fixed_notional: float | None = None) -> None:
         for name, v in (("entry_threshold", entry_threshold), ("trail_threshold", trail_threshold),
                         ("opposing_threshold", opposing_threshold), ("atr_stop_mult", atr_stop_mult),
                         ("opposing_distance_bps", opposing_distance_bps), ("risk_pct", risk_pct),
@@ -41,6 +49,11 @@ class SignalEngine:
                 raise ValueError(f"SignalEngine: {name} must be positive, got {v}")
         if entry_mode not in ("momentum", "reversion"):
             raise ValueError(f"SignalEngine: entry_mode must be 'momentum' or 'reversion', got {entry_mode!r}")
+        if fixed_notional is not None and not (math.isfinite(fixed_notional) and fixed_notional > 0):
+            raise ValueError(f"SignalEngine: fixed_notional must be positive, got {fixed_notional}")
+        # None: risk_pct of equity, capped by max_leverage. A number: every trade has that
+        # notional whatever the equity (the paper evaluation sizing since 2026-10-23).
+        self.fixed_notional = fixed_notional
         self.entry_threshold = entry_threshold
         self.trail_threshold = trail_threshold
         self.opposing_threshold = opposing_threshold
@@ -135,12 +148,55 @@ class SignalEngine:
         ok = (0.0 < stop < trigger) if best_dir == "LONG" else (stop > trigger > 0.0)
         if not ok:
             return
-        size = position_size(broker.equity(), entry=trigger, stop=stop,
-                             risk_pct=self.risk_pct, max_leverage=self.max_leverage)
+        size = self._size(broker, entry=trigger, stop=stop)
         if size <= 0:
             return
-        broker.place_entry(best_dir, trigger=trigger, stop=stop, size=size)
+        broker.place_entry(best_dir, trigger=trigger, stop=stop, size=size,
+                           context=self._context(analysis, price, atr, best, best_dir,
+                                                 entry=trigger, stop=stop, broker=broker))
         self.state, self._thesis, self._dir, self._armed_ts = "PENDING_ENTRY", best, best_dir, analysis.ts
+
+    def _size(self, broker, *, entry: float, stop: float) -> float:
+        if self.fixed_notional is not None:
+            return fixed_notional_size(self.fixed_notional, entry=entry)
+        return position_size(broker.equity(), entry=entry, stop=stop,
+                             risk_pct=self.risk_pct, max_leverage=self.max_leverage)
+
+    def _context(self, analysis: DepthAnalysis, price: float, atr: float, zone: Zone, direction: str, *,
+                 entry: float, stop: float, broker) -> dict:
+        """What the strategy saw when it armed the entry, stored with the trade so the log
+        can be analysed by setup (zone quality, distances, stop, room to the target)."""
+        if direction == "LONG":
+            zone_dist = (price - zone.high) / price * 1e4
+            walls = [z.low for z in analysis.resistances
+                     if z.confidence >= self.opposing_threshold and z.low > entry]
+            room = (min(walls) - entry) / entry * 1e4 if walls else None
+        else:
+            zone_dist = (zone.low - price) / price * 1e4
+            walls = [z.high for z in analysis.supports
+                     if z.confidence >= self.opposing_threshold and z.high < entry]
+            room = (entry - max(walls)) / entry * 1e4 if walls else None
+        return {
+            "mode": self.entry_mode,
+            "arm_ts": _r(analysis.ts, 3),
+            "arm_mid": _r(price, 2),
+            "entry_ref": _r(entry, 2),                       # trigger (momentum) / market price (reversion)
+            "stop": _r(stop, 2),
+            "stop_bps": _r(abs(entry - stop) / entry * 1e4, 2),
+            "room_bps": _r(room, 2),                         # entry -> nearest confident opposing wall
+            "zone_conf": _r(zone.confidence, 4),
+            "zone_persist_s": _r(zone.persistence_s, 1),
+            "zone_venues": len(zone.venues),
+            "zone_strength": _r(zone.strength, 4),
+            "zone_low": _r(zone.low, 2),
+            "zone_high": _r(zone.high, 2),
+            "zone_dist_bps": _r(zone_dist, 2),
+            "atr_bps": _r(atr / price * 1e4, 3) if price > 0 else None,
+            "n_sup": len(analysis.supports),
+            "n_res": len(analysis.resistances),
+            "sizing": "fixed" if self.fixed_notional is not None else "risk",
+            "equity": _r(broker.equity(), 2),
+        }
 
     def _opposing_near(self, analysis: DepthAnalysis, price: float, direction: str) -> bool:
         """True if a confident opposing wall sits within ``opposing_distance_bps`` —
@@ -168,13 +224,14 @@ class SignalEngine:
             ok = stop > price > 0.0
         if not ok:
             return
-        size = position_size(broker.equity(), entry=price, stop=stop,
-                             risk_pct=self.risk_pct, max_leverage=self.max_leverage)
+        size = self._size(broker, entry=price, stop=stop)
         if size <= 0:
             return
         risk = abs(price - stop)
         self._tp = price + self.tp_mult * risk if best_dir == "LONG" else price - self.tp_mult * risk
-        broker.enter_market(best_dir, stop=stop, size=size, ts=analysis.ts)
+        ctx = self._context(analysis, price, atr, best, best_dir, entry=price, stop=stop, broker=broker)
+        ctx["tp"] = _r(self._tp, 2)
+        broker.enter_market(best_dir, stop=stop, size=size, ts=analysis.ts, context=ctx)
         self.state, self._thesis, self._dir = "IN_POSITION", best, best_dir
 
     def _manage_reversion(self, analysis: DepthAnalysis, price: float, broker) -> None:

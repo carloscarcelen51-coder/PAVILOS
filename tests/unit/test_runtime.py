@@ -156,6 +156,7 @@ def test_recording_defaults_are_eternal_with_a_disk_floor():
 
 
 def _recording_runtime(tmp_path, **kw):
+    kw.setdefault("peg_live", False)          # no network in tests
     cfg = RuntimeConfig(book_data_dir=str(tmp_path / "lake"), **kw)
     return Runtime.build(cfg, connector_factory=lambda v, sym: _FakeConnector(v))
 

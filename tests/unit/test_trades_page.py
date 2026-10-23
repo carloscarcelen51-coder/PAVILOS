@@ -73,7 +73,8 @@ def test_api_trades_serves_everything_then_only_the_new_ones():
     row = dict(zip(body["fields"], body["rows"][1]))
     assert row == {"id": 1, "symbol": "ETH/USD", "side": "LONG", "size": 1.0, "entry": 100.0, "exit": 98.0,
                    "entry_ts": 1.0, "exit_ts": 2.0, "pnl": -2.0, "fee": 0.0, "return_pct": -2.0,
-                   "reason": "close"}
+                   "reason": "close", "context": None}
+    assert body["ref_notional"] == 10_000.0 and body["stable_since"] > 0
     boot = body["boot"]
 
     trades.append(_trade(3.0))                           # closed after the page loaded
@@ -98,6 +99,29 @@ def test_api_trades_non_finite_values_go_out_as_null():
     assert r.status_code == 200
     row = dict(zip(r.json()["fields"], r.json()["rows"][0]))
     assert row["exit"] is None and row["pnl"] is None and row["return_pct"] is None and row["entry"] == 100.0
+
+
+def test_api_trades_sends_the_entry_context_json_safe():
+    t = Trade(side="LONG", size=1.0, entry=100.0, exit=101.0, entry_ts=1.0, exit_ts=2.0, pnl=1.0, fee=0.0,
+              return_pct=1.0, reason="close", context={"room_bps": 12.5, "stop_bps": float("nan"), "n": 3})
+    body = TestClient(create_app(DashboardState(), trades=lambda: [t])).get("/api/trades").json()
+    row = dict(zip(body["fields"], body["rows"][0]))
+    assert row["context"] == {"room_bps": 12.5, "stop_bps": None, "n": 3}
+
+
+def test_api_runs_merges_the_deduced_june_starts_with_the_lake_markers(tmp_path):
+    from pavilos.web.history import PRE_SUPERVISOR_RUN_STARTS, STABLE_SETUP_SINCE
+    runs = tmp_path / "_runs.jsonl"
+    runs.write_text('{"start_ts": 1782843339.0, "pid": 1}\nnot json\n{"start_ts": 1792605326.29, "pid": 2}\n',
+                    encoding="utf-8")
+    body = TestClient(create_app(DashboardState(), runs_file=str(runs))).get("/api/runs").json()
+    starts = [r["start"] for r in body["runs"]]
+    assert starts == sorted(starts) and len(starts) == len(PRE_SUPERVISOR_RUN_STARTS) + 2
+    assert [r["source"] for r in body["runs"]][:3] == ["deducido"] * 3
+    assert body["runs"][-1] == {"start": 1792605326.29, "source": "registro"}
+    assert body["stable_since"] == STABLE_SETUP_SINCE == PRE_SUPERVISOR_RUN_STARTS[1]
+    none = TestClient(create_app(DashboardState())).get("/api/runs").json()
+    assert len(none["runs"]) == len(PRE_SUPERVISOR_RUN_STARTS)
 
 
 def test_api_trades_without_a_provider_is_empty():

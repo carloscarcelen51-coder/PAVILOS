@@ -283,7 +283,16 @@
   .td.r { text-align:right; }
   .td.idc { color:var(--ink-dim); }
   .rsn { font-size:9.5px; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink-dim); }
-  .rsn.stop { color:var(--amber); } .rsn.close { color:var(--cyan); }
+  .rsn.stop { color:var(--amber); } .rsn.close { color:var(--cyan); } .rsn.restart { color:var(--ask); }
+  .howto { border:1px solid var(--rule); background:var(--bg-panel); font-size:11.5px; }
+  .howto summary { cursor:pointer; padding:8px 14px; font-size:10px; font-weight:600; letter-spacing:2px;
+                   text-transform:uppercase; color:var(--amber); list-style:none; }
+  .howto summary::-webkit-details-marker { display:none; }
+  .howto summary::before { content:"▸ "; }
+  .howto[open] summary::before { content:"▾ "; }
+  .howto ul { margin:0; padding:2px 18px 12px 34px; color:var(--ink-dim); line-height:1.65; }
+  .howto li { margin:4px 0; }
+  .howto b { color:var(--ink); font-weight:600; }
   .tfoot { display:flex; flex-wrap:wrap; gap:4px 20px; padding:8px 14px; border-top:1px solid var(--rule); font-size:11px; color:var(--ink-dim); }
   .tfoot b { color:var(--ink); font-weight:600; }
   .panel.full { position:fixed; left:0; right:0; top:var(--head-h); bottom:0; z-index:55; display:flex; flex-direction:column; }
@@ -386,6 +395,17 @@
       </div>
 
       <div class="fg">
+        <h3>Cómo contar</h3>
+        <div class="frow"><span>Tamaño</span>
+          <div class="seg" id="f-size"><button type="button" data-v="norm" title="Cada trade como si hubiera sido de 10.000 €: comparable entre trades y sesiones">10.000 €</button><button type="button" data-v="real" title="Los importes tal como se registraron (hasta el 23-10, el 1 % del capital de cada sesión)">Registrado</button></div>
+        </div>
+        <div class="frow"><span>8–9 jun</span>
+          <div class="seg" id="f-setup"><button type="button" data-v="estable" title="Excluye los 758 trades hechos mientras se añadían exchanges (6 → 14) y se cambiaba la frecuencia">Excluir</button><button type="button" data-v="todo">Incluir</button></div>
+        </div>
+        <div class="hint">Por defecto, cada trade a 10.000 € y sin la puesta en marcha del 8–9 de junio. «Cómo leer estas cifras», arriba, lo explica.</div>
+      </div>
+
+      <div class="fg">
         <h3>Periodo <span class="x" data-clear="period">limpiar</span></h3>
         <div class="chips" id="f-presets"></div>
         <div class="frow"><span>Desde</span><input type="datetime-local" id="f-from" /></div>
@@ -436,6 +456,16 @@
 
     <main>
       <div class="acct" id="acct"></div>
+      <details class="howto" id="howto">
+        <summary>Cómo leer estas cifras</summary>
+        <ul>
+          <li><b>Tamaño a 10.000 €.</b> Hasta el 23-10 el paper dimensionaba cada trade con el 1 % del capital de su sesión, que se iba gastando: hubo trades de 4 € y de 96.000 €, que no se pueden sumar ni comparar. Por defecto cada trade se cuenta como si hubiera sido de 10.000 € (el resultado en pb no cambia). Desde el 23-10 el paper ya opera así.</li>
+          <li><b>Sesiones.</b> Hasta el 23-10, cada arranque del programa reponía la cuenta a 10.000 € y perdía la posición que estuviera abierta (unas 2 en total, estimado). Por eso el P&amp;L registrado suma una cuenta de 10.000 € por arranque: no es el resultado de una sola cuenta. Las líneas verticales de la curva marcan los arranques; la pestaña «Sesión» del desglose las resume. Desde el 23-10 la cuenta continúa entre arranques, y una posición abierta al apagar se cierra al volver con el motivo <span class="rsn restart">restart</span>.</li>
+          <li><b>Puesta en marcha.</b> Hasta el reinicio del 9-06 a las 13:20 UTC se estaban añadiendo exchanges (6 → 14) y cambiando la frecuencia de cálculo: 758 trades. Se excluyen por defecto.</li>
+          <li><b>Días.</b> Sharpe, Sortino y la volatilidad usan solo los días en que el programa estuvo en marcha; los días con el programa apagado no cuentan como días a 0 €.</li>
+          <li><b>Desde el 23-10</b> los precios en USDT se pasan a dólares con su cotización real (antes 1,0: unos 12 pb de sesgo) y cada trade guarda su contexto de entrada: stop, espacio hasta el objetivo y calidad de la zona (columnas y rangos nuevos).</li>
+        </ul>
+      </details>
       <div class="active-chips" id="chips"></div>
       <div class="kpis" id="kpis"></div>
 
@@ -554,15 +584,19 @@
     { k: "not", l: "Nocional", u: "€", f: ["notionalMin", "notionalMax"] },
     { k: "ent", l: "Precio de entrada", u: "", f: ["entryMin", "entryMax"] },
     { k: "fee", l: "Comisión", u: "€", f: ["feeMin", "feeMax"] },
+    { k: "stop", l: "Stop inicial", u: "pb · desde 23-10", f: ["stopMin", "stopMax"] },
+    { k: "room", l: "Espacio hasta el objetivo", u: "pb · desde 23-10", f: ["roomMin", "roomMax"] },
   ];
   const ALL_WD = [0, 1, 2, 3, 4, 5, 6];
   const blankRanges = () => Object.fromEntries(RANGES.map((r) => [r.k, [null, null]]));
   const defaults = () => ({ sym: "ALL", side: "ALL", res: "ALL", reasons: null, preset: "todo", from: null, to: null,
                             tf: "exit", r: blankRanges(), hf: null, ht: null, wd: ALL_WD.slice(), q: "", tz: "local",
-                            cap: null });
+                            cap: null, size: "norm", setup: "estable" });
   let F = defaults();
   const S = {
-    all: [], byId: new Map(), dropped: 0, boot: null, total: 0, startEquity: 10000,
+    all: [], norm: [], byId: new Map(), byIdNorm: new Map(), filteredIds: new Set(),
+    dropped: 0, boot: null, total: 0, startEquity: 10000,
+    refNotional: 10000, stableSince: null, runs: [], runSrc: [], activeDays: null, activeKey: "",
     symbols: [], reasons: [], filtered: [], view: [], m: null,
     sel: null, sort: { key: "exit_ts", dir: "desc" }, bk: "day", bkSort: null,
     live: true, lastOk: null, err: null, loaded: false, polling: false, lastApply: 0, applyMs: 0,
@@ -589,6 +623,8 @@
     if (F.q) p.set("q", F.q);
     if (F.tz !== "local") p.set("zona", F.tz);
     if (F.cap != null) p.set("capital", F.cap);
+    if (F.size !== "norm") p.set("tam", F.size);
+    if (F.setup !== "estable") p.set("puesta", F.setup);
     if (S.sort.key !== "exit_ts" || S.sort.dir !== "desc") p.set("orden", S.sort.key + ":" + S.sort.dir);
     if (S.bk !== "day") p.set("desglose", S.bk);
     const h = p.toString();
@@ -619,6 +655,8 @@
     if (p.get("zona") === "utc") f.tz = "utc";
     const cap = nv(p.get("capital"));
     if (cap != null && cap > 0) f.cap = cap;
+    if (p.get("tam") === "real") f.size = "real";
+    if (p.get("puesta") === "todo") f.setup = "todo";
     const ord = (p.get("orden") || "").split(":");
     S.sort = ord.length === 2 && COLS.some((c) => c.k === ord[0]) && (ord[1] === "asc" || ord[1] === "desc")
       ? { key: ord[0], dir: ord[1] } : { key: "exit_ts", dir: "desc" };
@@ -636,9 +674,26 @@
     const b = currentBounds();
     const spec = { symbol: F.sym, side: F.side, result: F.res, reasons: F.reasons, from: b.from, to: b.to,
                    timeField: F.tf, hourFrom: F.hf, hourTo: F.ht, weekdays: F.wd.length === 7 ? null : F.wd,
-                   tz: F.tz, text: F.q };
+                   tz: F.tz, text: F.q, notBefore: F.setup === "estable" ? S.stableSince : null };
     for (const r of RANGES) { spec[r.f[0]] = F.r[r.k][0]; spec[r.f[1]] = F.r[r.k][1]; }
     return spec;
+  }
+  // Trades sobre los que se calcula: a 10.000 € (por defecto) o con los importes registrados.
+  const baseTrades = () => (F.size === "norm" ? S.norm : S.all);
+  // Días con el programa en marcha (algún trade de cualquier par ese día), en la zona elegida.
+  function activeDays() {
+    const key = F.tz + "|" + S.all.length;
+    if (S.activeKey !== key) {
+      S.activeDays = new Set(S.all.map((t) => M.dayKey(t.exit_ts, F.tz)));
+      S.activeKey = key;
+    }
+    return S.activeDays;
+  }
+  function runLabel(i) {
+    if (i < 0) return "antes del primer arranque";
+    const p = M.parts(S.runs[i], F.tz), z = (n) => String(n).padStart(2, "0");
+    return `S${i + 1} · ${z(p.d)}/${z(p.m + 1)}/${String(p.y).slice(2)} ${z(p.hour)}:${z(p.min)}` +
+           (S.runSrc[i] === "deducido" ? " (deducido)" : "");
   }
 
   // ── tabla: definición de columnas ────────────────────────────────────────
@@ -660,14 +715,22 @@
     { k: "return_pct", l: "Rent. %", w: 90, r: true, f: (t) => sNum(t.return_pct, 4), t: "P&L neto / nocional" },
     { k: "_cum", l: "Acumulado €", w: 118, r: true, f: (t) => sNum(t._cum, 2), t: "P&L neto acumulado del filtro, en orden de salida" },
     { k: "_bal", l: "Balance €", w: 118, r: true, f: (t) => num(t._bal, 2), t: "Capital base + P&L acumulado del filtro" },
-    { k: "reason", l: "Motivo", w: 72, f: (t) => `<span class="rsn ${esc(t.reason)}">${esc(t.reason || EM)}</span>` },
+    { k: "reason", l: "Motivo", w: 74, f: (t) => `<span class="rsn ${esc(t.reason)}">${esc(t.reason || EM)}</span>` },
+    { k: "stop_bps", l: "Stop pb", w: 80, r: true, f: (t) => num(t.stop_bps, 1), t: "Distancia del stop inicial a la entrada (contexto, desde el 23-10)" },
+    { k: "room_bps", l: "Espacio pb", w: 90, r: true, f: (t) => num(t.room_bps, 1), t: "De la entrada a la resistencia (o soporte) confiable más cercana: el recorrido hasta el objetivo (contexto, desde el 23-10)" },
+    { k: "zone_conf", l: "Conf. zona", w: 88, r: true, f: (t) => num(t.zone_conf, 2), t: "Confianza de la zona que dio la entrada (contexto, desde el 23-10)" },
   ];
   const TEXT_COLS = new Set(["symbol", "side", "reason"]);
+  const NEW_COLS_V2 = ["stop_bps", "room_bps", "zone_conf"];      // añadidas el 23-10
   function loadCols() {
-    try { const v = JSON.parse(localStorage.getItem("pavilos.trades.cols") || "null"); if (Array.isArray(v)) return new Set(v); } catch (e) { /* sin almacenamiento */ }
+    try {
+      const v = JSON.parse(localStorage.getItem("pavilos.trades.cols") || "null");
+      if (Array.isArray(v)) return new Set(v.concat(NEW_COLS_V2));   // guardado antes de existir: se muestran
+      if (v && Array.isArray(v.cols)) return new Set(v.cols);
+    } catch (e) { /* sin almacenamiento */ }
     return new Set(COLS.map((c) => c.k));
   }
-  function saveCols() { try { localStorage.setItem("pavilos.trades.cols", JSON.stringify(Array.from(S.cols))); } catch (e) { /* nada */ } }
+  function saveCols() { try { localStorage.setItem("pavilos.trades.cols", JSON.stringify({ v: 2, cols: Array.from(S.cols) })); } catch (e) { /* nada */ } }
   const visibleCols = () => COLS.filter((c) => S.cols.has(c.k));
 
   // ── desglose: pestañas y columnas ────────────────────────────────────────
@@ -676,6 +739,7 @@
     { k: "month", l: "Mes", period: "month" }, { k: "year", l: "Año", period: "year" },
     { k: "reason", l: "Motivo" }, { k: "side", l: "Lado" }, { k: "symbol", l: "Par" },
     { k: "hour", l: "Hora" }, { k: "wd", l: "Día de la semana" }, { k: "dur", l: "Duración" },
+    { k: "run", l: "Sesión" },
   ];
   const BK_COLS = [
     { k: "sortKey", l: "Grupo", f: (g) => g.label },
@@ -692,6 +756,9 @@
     { k: "roi_pct", l: "ROI", f: (g) => sPct(g.roi_pct, 2), period: true },
     { k: "bal_end", l: "Balance fin €", f: (g) => num(g.bal_end, 2), period: true },
     { k: "max_dd", l: "DD dentro €", f: (g) => (g.max_dd > 0 ? span("down", num(-g.max_dd, 2)) : num(0, 2)), period: true },
+    { k: "pnl_real", l: "P&L registrado €", f: (g) => sNum(g.pnl_real, 2), run: true },
+    { k: "notional_first", l: "Nocional registrado: inicio → final €", run: true,
+      f: (g) => `${num(g.notional_first, 0)} → <span class="${g.notional_last < g.notional_first / 3 ? "down" : ""}">${num(g.notional_last, 0)}</span>` },
   ];
 
   // ── utilidades de interfaz ───────────────────────────────────────────────
@@ -766,6 +833,7 @@
   function syncInputs() {
     $("#f-sym").value = F.sym;
     syncSeg("f-tz", F.tz); syncSeg("f-tf", F.tf); syncSeg("f-side", F.side); syncSeg("f-res", F.res);
+    syncSeg("f-size", F.size); syncSeg("f-setup", F.setup);
     $$("#f-presets button").forEach((b) => b.classList.toggle("on", b.dataset.v === F.preset));
     const b = currentBounds();
     $("#f-from").value = M.toDateInput(b.from, F.tz);
@@ -795,6 +863,8 @@
     seg("f-tf", (v) => { F.tf = v; });
     seg("f-side", (v) => { F.side = v; });
     seg("f-res", (v) => { F.res = v; });
+    seg("f-size", (v) => { F.size = v; });
+    seg("f-setup", (v) => { F.setup = v; });
     seg("f-presets", (v) => { F.preset = v; F.from = F.to = null; });
     const dateChange = (which) => () => change(() => {
       const b = currentBounds();
@@ -962,9 +1032,10 @@
   function apply(keepScroll) {
     if (!S.loaded) return;
     const t0 = performance.now();
-    S.filtered = M.applyFilters(S.all, filterSpec());
+    S.filtered = M.applyFilters(baseTrades(), filterSpec());
+    S.filteredIds = new Set(S.filtered.map((t) => t.id));
     const base = baseCapital();
-    S.m = M.compute(S.filtered, base, F.tz);
+    S.m = M.compute(S.filtered, base, F.tz, { activeDays: activeDays() });
     const bal = M.runningBalances(S.filtered, base);
     for (const t of S.filtered) { const b = bal[t.id]; t._cum = b.cum; t._bal = b.bal; }
     sortView();
@@ -980,18 +1051,19 @@
   function sortView() { S.view = M.sortTrades(S.filtered, S.sort.key, S.sort.dir); }
 
   function renderAccount() {
-    let net = 0, wins = 0, fees = 0;
-    for (const t of S.all) { net += t.pnl; fees += t.fee; if (t.pnl > 0) wins++; }
-    const n = S.all.length, base = S.startEquity;
+    let net = 0, wins = 0, notl = 0, netNorm = 0;
+    for (const t of S.all) { net += t.pnl_real; notl += t.notional_real; if (t.pnl_real > 0) wins++; }
+    for (const t of S.norm) netNorm += t.pnl;
+    const n = S.all.length, ref = S.refNotional;
+    const sessions = new Set(S.all.map((t) => M.runIndex(S.runs, t.entry_ts))).size;
     $("#acct").innerHTML =
       `<span class="tag">Cuenta completa</span>` +
       `<span><span class="k">Trades</span><b class="num">${int(n)}</b></span>` +
-      `<span><span class="k">P&amp;L neto</span><b class="num">${sEur(net)}</b></span>` +
-      `<span><span class="k">Balance</span><b class="num">${eur(base + net)}</b></span>` +
-      `<span><span class="k">ROI</span><b class="num">${sPct(n ? net / base * 100 : 0, 2)}</b></span>` +
+      `<span title="P&amp;L neto / nocional, de todos los trades: no depende del tamaño"><span class="k">Neto por trade</span><b class="num">${sNum(notl > 0 ? net / notl * 1e4 : null, 2)} pb</b></span>` +
+      `<span title="Cada trade como si hubiera sido de ${eur(ref, 0)}"><span class="k">A ${eur(ref, 0)} por trade</span><b class="num">${sEur(netNorm)}</b></span>` +
+      `<span title="Tal como quedó en el log: hasta el 23-10, una cuenta de 10.000 € por cada arranque"><span class="k">Registrado</span><b class="num">${sEur(net)}</b> <span class="dim">en ${int(sessions)} sesiones</span></span>` +
       `<span><span class="k">Win rate</span><b class="num">${pct(n ? wins / n * 100 : null, 2)}</b></span>` +
-      `<span><span class="k">Comisiones</span><b class="num">${eur(fees)}</b></span>` +
-      `<span class="note">todos los pares, sin filtros, capital inicial ${eur(base, 0)} · mismas cifras que el panel en vivo</span>`;
+      `<span class="note">todos los pares y fechas, sin filtros · el registrado es el del panel en vivo</span>`;
   }
   function renderCount() {
     const n = S.filtered.length;
@@ -1001,7 +1073,8 @@
 
   const KPIS = [
     { k: "Balance final", v: (m) => eur(m.final_balance), c: (m) => sgn(m.final_balance - m.start_equity),
-      s: (m) => "desde " + eur(m.start_equity, 0), h: "Capital base + P&L neto de los trades del filtro" },
+      s: (m) => "desde " + eur(m.start_equity, 0) + (F.size === "norm" ? ` · trades a ${eur(S.refNotional, 0)}` : " · importes registrados"),
+      h: "Capital base + P&L neto de los trades del filtro" },
     { k: "ROI", v: (m) => pct(m.roi_pct, 2, true), c: (m) => sgn(m.roi_pct),
       s: (m) => (m.annual_return_pct == null ? "sin anualizar (periodo < 30 días)" : "anualizado " + pct(m.annual_return_pct, 1, true)),
       h: "P&L neto / capital base" },
@@ -1113,7 +1186,10 @@
         ["Último trade (salida)", M.fmtDate(m.last_ts, F.tz, true), ""],
         ["Periodo", num(m.period_days, 1) + " días", "De la primera entrada a la última salida."],
         ["Trades al día", num(m.trades_per_day, 1), "Trades / días del periodo."],
-        ["Días con trades / días naturales", `${int(m.days_traded)} / ${int(m.calendar_days)}`, "Días con algún cierre / días de calendario del periodo."],
+        m.days_basis === "active"
+          ? ["Días con trades / días en marcha", `${int(m.days_traded)} / ${int(m.calendar_days)}`,
+             "Días con algún cierre del filtro / días del periodo con el programa en marcha (algún trade de cualquier tipo). Los días con el programa apagado no cuentan."]
+          : ["Días con trades / días naturales", `${int(m.days_traded)} / ${int(m.calendar_days)}`, "Días con algún cierre / días de calendario del periodo."],
         ["Días positivos", pct(m.positive_days_pct, 1), "De los días con trades, los que acaban con P&L neto > 0."],
         ["Mejor día", sEur(m.best_day) + (m.best_day_key ? ` <span class="dim">${M.fmtDayKey(m.best_day_key)}</span>` : ""), "Día (por hora de salida) con mayor P&L neto."],
         ["Peor día", sEur(m.worst_day) + (m.worst_day_key ? ` <span class="dim">${M.fmtDayKey(m.worst_day_key)}</span>` : ""), "Día con menor P&L neto."],
@@ -1155,6 +1231,7 @@
     else if (tab.k === "hour") rows = M.byHour(t, F.tz).filter((g) => g.n).map((g) => Object.assign(g, { label: `${String(g.key).padStart(2, "0")}:00 – ${String(g.key).padStart(2, "0")}:59`, sortKey: g.key }));
     else if (tab.k === "wd") rows = M.byWeekday(t, F.tz).filter((g) => g.n).map((g) => Object.assign(g, { label: WD_LONG[g.key], sortKey: g.key }));
     else if (tab.k === "dur") rows = M.byDuration(t).map((g) => Object.assign(g, { label: g.key, sortKey: M.DURATION_BUCKETS.findIndex((b) => b.key === g.key) }));
+    else if (tab.k === "run") rows = M.groupRuns(t, S.runs).map((g) => Object.assign(g, { label: runLabel(g.run), sortKey: g.run }));
     else {
       const key = tab.k === "reason" ? (x) => x.reason : tab.k === "side" ? (x) => x.side : (x) => x.symbol;
       rows = M.groupBy(t, key).map((g) => Object.assign(g, { label: g.key || "(sin motivo)", sortKey: g.key }));
@@ -1162,7 +1239,7 @@
     return rows;
   }
   function renderBk() {
-    const tab = bkDef(), sort = bkSort(), cols = BK_COLS.filter((c) => !c.period || tab.period);
+    const tab = bkDef(), sort = bkSort(), cols = BK_COLS.filter((c) => (!c.period || tab.period) && (!c.run || tab.k === "run"));
     const rows = M.sortTrades(bkGroups(), sort.key, sort.dir);
     S.bkRows = rows;
     $("#bk-sub").textContent = rows.length ? `${int(rows.length)} grupos` : "";
@@ -1188,6 +1265,12 @@
       else if (tab.k === "dur") {
         const i = M.DURATION_BUCKETS.findIndex((b) => b.key === g.key);
         F.r.dur = [i > 0 ? M.DURATION_BUCKETS[i - 1].max : null, isFinite(M.DURATION_BUCKETS[i].max) ? M.DURATION_BUCKETS[i].max : null];
+      }
+      else if (tab.k === "run") {                     // la sesión: de su arranque al siguiente, por entrada
+        const k = g.run;
+        F.preset = "custom"; F.tf = "entry";
+        F.from = k >= 0 ? S.runs[k] : null;
+        F.to = k + 1 < S.runs.length ? S.runs[k + 1] - 0.001 : null;
       }
     });
     toast("Filtro aplicado: " + g.label);
@@ -1246,7 +1329,7 @@
     const d = new Date(), p2 = (x) => String(x).padStart(2, "0");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `pavilos_trades_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}.csv`;
+    a.download = `pavilos_trades_${F.size === "norm" ? "a10000" : "registrado"}_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     toast(`${int(S.view.length)} trades exportados`);
@@ -1336,6 +1419,18 @@
       ctx.strokeStyle = "rgba(255,255,255,.035)"; ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, ddTop + ddH); ctx.stroke();
       ctx.fillStyle = C.faint; ctx.fillText(tt.fmt(t), x, h - 7);
     }
+    // arranques del programa (hasta el 23-10 cada uno reponía la cuenta a 10.000 €)
+    const starts = S.runs.filter((s) => s > x0 && s < x1);
+    if (starts.length) {
+      ctx.setLineDash([2, 4]); ctx.strokeStyle = "rgba(227,162,60,.32)";
+      for (const s of starts) {
+        const x = Math.round(X(s)) + 0.5;
+        ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + eqH); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(227,162,60,.55)"; ctx.textAlign = "right"; ctx.textBaseline = "top";
+      ctx.fillText(`${starts.length} arranques`, w - R - 4, T + 2);
+    }
     // capital base
     const yb = Math.round(Y(base)) + 0.5;
     ctx.setLineDash([4, 4]); ctx.strokeStyle = C.amber; ctx.globalAlpha = 0.6;
@@ -1394,8 +1489,8 @@
     const ov = $("#cv-eq-ov"), { ctx } = prep(ov), g = $("#cv-eq")._g;
     if (!g) return;
     if (S.sel != null) {
-      const t = S.byId.get(S.sel);
-      if (t && t.exit_ts >= g.x0 && t.exit_ts <= g.x1 && S.filtered.includes(t)) {
+      const t = tradeById(S.sel);
+      if (t && t.exit_ts >= g.x0 && t.exit_ts <= g.x1 && S.filteredIds.has(t.id)) {
         const x = Math.round(g.X(t.exit_ts)) + 0.5;
         ctx.strokeStyle = C.amber; ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.moveTo(x, g.T); ctx.lineTo(x, g.ddTop + g.ddH); ctx.stroke(); ctx.globalAlpha = 1;
         ctx.fillStyle = C.amber; ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillText("#" + t.id, x + 4, g.T);
@@ -1415,7 +1510,7 @@
       const x = e.clientX - ov.getBoundingClientRect().left;
       if (x < g.L - 4 || x > g.L + g.pw + 4) { S.hover.eq = -1; hideTip(); drawEqOverlay(-1); return; }
       const ts = g.x0 + Math.min(1, Math.max(0, (x - g.L) / g.pw)) * (g.x1 - g.x0);
-      const i = M.nearestIndex(g.pts, ts), p = g.pts[i], t = p.id != null ? S.byId.get(p.id) : null;
+      const i = M.nearestIndex(g.pts, ts), p = g.pts[i], t = p.id != null ? tradeById(p.id) : null;
       S.hover.eq = i; drawEqOverlay(i);
       ov.style.cursor = t ? "pointer" : "default";
       showTip(e, `<div class="h">${t ? "trade #" + t.id + " · " + esc(t.side) + " · " + esc(t.symbol) : "inicio"}</div>` +
@@ -1551,12 +1646,35 @@
     const body = await res.json();
     const reset = full || body.boot !== S.boot || body.since !== since;
     const e = M.enrich(M.fromRows(body.fields, body.rows));
-    if (reset) { S.all = e.trades; S.dropped = e.dropped; S.byId = new Map(); }
-    else { for (const t of e.trades) S.all.push(t); S.dropped += e.dropped; }
+    S.refNotional = body.ref_notional || 10000;
+    S.stableSince = body.stable_since != null ? body.stable_since : null;
+    const norm = M.normalize(e.trades, S.refNotional);
+    if (reset) {
+      S.all = e.trades; S.norm = norm; S.dropped = e.dropped; S.byId = new Map(); S.byIdNorm = new Map();
+    } else {
+      for (const t of e.trades) S.all.push(t);
+      for (const t of norm) S.norm.push(t);
+      S.dropped += e.dropped;
+    }
     for (const t of e.trades) S.byId.set(t.id, t);
+    for (const t of norm) S.byIdNorm.set(t.id, t);
     S.boot = body.boot; S.total = body.total; S.startEquity = body.starting_equity;
+    if (reset) await fetchRuns();
     return { reset, added: e.trades.length };
   }
+  // Arranques del programa (marcas del lake + los tres de junio deducidos del log).
+  async function fetchRuns() {
+    try {
+      const res = await fetch("/api/runs", { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const body = await res.json();
+      S.runs = body.runs.map((r) => r.start);
+      S.runSrc = body.runs.map((r) => r.source);
+    } catch (e) {
+      S.runs = []; S.runSrc = [];                   // sin sesiones: el resto de la página sigue
+    }
+  }
+  const tradeById = (id) => (F.size === "norm" ? S.byIdNorm : S.byId).get(id);
   function renderLive() {
     const el = $("#live-st"), t = $("#live-t"), hh = (ms) => new Date(ms).toLocaleTimeString("es-ES", { hour12: false });
     el.classList.toggle("on", S.live && !S.err && S.loaded);

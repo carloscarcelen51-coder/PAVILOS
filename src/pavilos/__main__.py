@@ -103,7 +103,7 @@ def setup_logging(log_dir: Path = _LOG_DIR) -> Path | None:
 
 def main() -> None:
     log_path = setup_logging()
-    cfg = RuntimeConfig()
+    cfg = RuntimeConfig(paper_state_path="paper_state.json")   # next to paper_trades.jsonl
     rt = Runtime.build(cfg)
     _log = logging.getLogger("pavilos")
     _log.info("PAVILOS paper dashboard on http://%s:%d (PAPER mode, %d venues); log: %s",
