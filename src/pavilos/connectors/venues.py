@@ -45,7 +45,14 @@ _CCXT_STAGGER = {"gate": 0.0, "mexc": 1.0, "htx": 2.0, "cryptocom": 3.0, "bitget
 # Per-venue ccxt config overrides. Bitget's local-checksum verification hits a ccxt
 # bug (handle_check_sum_error -> UnsubscribeError) that kills its book on the 2nd
 # update and reconnect-storms (starving the other ccxt venues); disable it.
-_CCXT_OPTIONS = {"bitget": {"options": {"watchOrderBook": {"checksum": False}}}}
+# htx: load SPOT markets only. By default ccxt also loads its derivatives from
+# api.hbdm.vn, which this ISP intercepts at times (test certificate CN=core1.netops.test):
+# load_markets then fails and the venue stops recording (most of its ~1,100 reconnects
+# in 10 days). Verified live 2026-10-23: 2,175 spot markets in 2 s, BTC/USDT book OK.
+_CCXT_OPTIONS = {
+    "bitget": {"options": {"watchOrderBook": {"checksum": False}}},
+    "htx": {"options": {"fetchMarkets": {"types": {"spot": True, "linear": False, "inverse": False}}}},
+}
 
 
 def _coinbase_connect(symbol: str):
@@ -66,7 +73,8 @@ def _coinbase_connect(symbol: str):
 
 def _okx_connect(symbol: str):
     async def connect() -> AsyncIterator[dict]:
-        ws = await websockets.connect("wss://ws.okx.com:8443/ws/v5/public", max_size=None)
+        # Port 443: OKX shuts the :8443 endpoints down on 2026-10-31 (verified live 2026-10-23).
+        ws = await websockets.connect("wss://ws.okx.com/ws/v5/public", max_size=None)
         await ws.send(json.dumps({"op": "subscribe", "args": [{"channel": "books", "instId": symbol}]}))
 
         async def gen() -> AsyncIterator[dict]:
