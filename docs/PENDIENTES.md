@@ -1,14 +1,13 @@
 # PAVILOS — Pendientes
 
-Actualizado: 2026-10-21. Fuente de cada punto entre corchetes: los códigos (F, DER, R, RA) son hallazgos del análisis
+Actualizado: 2026-10-23. Fuente de cada punto entre corchetes: los códigos (F, DER, R, RA) son hallazgos del análisis
 del 2026-10-17, con evidencia completa en [`docs/analisis/2026-10-17-informes-parciales.md`](analisis/2026-10-17-informes-parciales.md).
 **Esos informes aún no han pasado la verificación adversarial**: confirmar cada punto antes de cambiar código.
+**El orden de trabajo y las decisiones pendientes están en [`PLAN_MEJORA_2026-10-23.md`](PLAN_MEJORA_2026-10-23.md).**
 
 ## 🔴 Urgente (con fecha)
 
-1. **OKX apaga el puerto WS 8443 el 31-10-2026.** `src/pavilos/connectors/venues.py:69` usa
-   `wss://ws.okx.com:8443/ws/v5/public`. Cambiar a `wss://ws.okx.com/ws/v5/public` (443; probado el 17-10). Si no, el
-   feed de OKX spot muere ese día. Es una línea, más un reinicio corto del recorder. [DER-01]
+1. ✅ **OKX al puerto 443** (hecho el 23-10, verificado en vivo antes del cierre del 8443 el 31-10). [DER-01]
 2. **Espacio en D:** 106 GiB libres el 23-10. Desde el 23-10 la grabación se pausa por debajo de **20 GiB** (antes
    100; decisión del operador) y no borra nada. Otros
    proyectos consumen D: a ráfagas. **El operador lo resuelve (21-10).** Propuesta técnica: lake frío (pre-M17) en L:,
@@ -16,21 +15,17 @@ del 2026-10-17, con evidencia completa en [`docs/analisis/2026-10-17-informes-pa
 
 ## 🟠 Calidad de los datos BTC (antes de añadir nada)
 
-3. **USDT ≠ USD.** El agregador fija USDT = 1,0 (`aggregator/normalize.py:22`; `set_rate` no se llama nunca), y USDT/USD
-   real está a unos −13 pb (entre −21,5 y +15,6 pb en 2 años). El libro combinado mezcla dos grupos separados ~14 pb y
-   la presión ±10 pb que pilota la cabalgada queda sesgada (−0,09 a −0,18). Hay que:
-   - grabar USDT/USD y USDC/USD (Kraken; respaldo en Coinbase o Bitstamp);
-   - conectar un peg vivo con `set_rate`;
-   - usar la serie histórica para corregir el replay.
-   [F01 BLOCKER, DER-03]
+3. **USDT ≠ USD.** Hecho el 23-10: el agregador recibe USDT/USD y USDC/USD reales de Kraken cada 30 s (antes 1,0;
+   USDT estaba a −12,1 pb) y cada lectura se guarda en `D:\pavilos_book_data\_pegs.jsonl`. **Falta** corregir el
+   replay: desde el 23-10 con `_pegs.jsonl` y, antes, con una serie histórica de USDT/USD. Sin eso, los backtests sobre
+   el lake siguen sesgados unos 12 pb. Falta también un respaldo de la fuente (Coinbase o Bitstamp). [F01, DER-03]
 4. **ccxt pierde actualizaciones por coalescencia.** Mensajes fusionados (se pierden en el lake): kucoin 95 % (273 msg/s
    llegan y quedan 14,3/s), cryptocom 91 %, bitfinex 84 %, gemini 79 %, gate 66 %, bitget 55 %, mexc 44 %. Además ese
    camino gasta ~40 % del tiempo de CPU. Arreglo: emitir un delta por mensaje desde ccxt (hook en `OrderBookSide`) o
    pasar a conectores nativos. [R2 BLOCKER, RA-02]
-5. **htx deja de grabar a ratos.** ccxt carga también los derivados en `api.hbdm.vn`, y el proveedor intercepta ese
-   dominio con un certificado de prueba (CN=core1.netops.test) en franjas de partidos y fines de semana: explica 885-991
-   de sus ~1.100 reconexiones. Arreglo de una línea en `venues.py`:
-   `options.fetchMarkets.types = {spot: True, linear: False, inverse: False}`. [R3, DER-11, RA-07, F12]
+5. ✅ **htx solo carga spot** (hecho el 23-10, verificado en vivo). Sus derivados en `api.hbdm.vn`, interceptado a ratos
+   por el proveedor, le hacían fallar `load_markets`. Hay que vigilar sus reconexiones en los próximos días.
+   [R3, DER-11, RA-07, F12]
 6. **Cada reconexión ccxt recarga todos los mercados** dentro del bucle: gate 5,5 s de CPU por recarga, bitget 3,6 s,
    kucoin 2,5 s; ~190 MB. Reutilizar la instancia y los mercados y cargar solo spot. [R4]
 7. **bitfinex:** 3.291 reconexiones del 07-10 al 17-10 (ChecksumError, KeyError y TypeError de ccxt). Actualizar ccxt
@@ -115,3 +110,13 @@ paralelo. El propio análisis degradó el recorder [R1].
   - **Formato del log:** desde aquí cada línea lleva `symbol`. Un código anterior a este commit descartaría esas
     líneas al leer, así que no se debe volver atrás sin tenerlo en cuenta. `load()` ya ignora campos desconocidos para
     el futuro.
+- 2026-10-23: suelo de disco de D: bajado de 100 a 20 GiB (decisión del operador).
+- 2026-10-23: medición veraz (tandas A, B y C del [plan](PLAN_MEJORA_2026-10-23.md)):
+  - **Conexiones:** OKX por el 443 y htx solo spot.
+  - **Paper:** opera con 10.000 € fijos por trade y la cuenta continúa entre arranques (`paper_state.json`). Una
+    posición abierta al apagar se cierra al volver con el motivo `restart`.
+  - **Contexto:** cada trade guarda su contexto de entrada.
+  - **USDT/USDC:** a su precio real desde Kraken (`_pegs.jsonl`).
+  - **`/trades`:** cuenta cada trade a 10.000 € por defecto, excluye la puesta en marcha (8–9 jun), muestra las sesiones
+    y la guía «Cómo leer estas cifras», y calcula los ratios solo con los días en marcha.
+  - **Auditoría:** `scripts/audit_trades.py` (solo lectura) reconstruye las sesiones y exporta los trades anotados.
