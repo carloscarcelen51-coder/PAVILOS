@@ -97,7 +97,8 @@ class RuntimeConfig:
     book_flush_interval_s: float = 5.0
     book_checkpoint_every_s: float = 60.0   # full live copy of every active book -> replay base + heals drops
     book_retention_days: int | None = None  # None = ETERNAL: nothing is ever deleted automatically
-    book_min_free_gb: float | None = 100.0  # shared D: floor (GiB, as Explorer shows): below it recording PAUSES
+    book_min_free_gb: float | None = 20.0   # shared D: floor (GiB, as Explorer shows): below it recording PAUSES
+                                            # (lowered 100 -> 20 by the operator on 2026-10-23)
     book_janitor_every_s: float = 600.0     # how often the floor (and the age limit, if any) is re-checked
 
 

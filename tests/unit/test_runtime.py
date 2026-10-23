@@ -150,7 +150,7 @@ def test_supervisor_restarts_a_crashing_trading_loop():
 def test_recording_defaults_are_eternal_with_a_disk_floor():
     cfg = RuntimeConfig()
     assert cfg.book_retention_days is None          # nothing is ever deleted automatically
-    assert cfg.book_min_free_gb == 100.0
+    assert cfg.book_min_free_gb == 20.0             # operator's decision (2026-10-23); was 100
     assert cfg.book_checkpoint_every_s == 60.0
     assert cfg.book_janitor_every_s == 600.0
 

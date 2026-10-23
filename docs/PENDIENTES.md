@@ -9,7 +9,8 @@ del 2026-10-17, con evidencia completa en [`docs/analisis/2026-10-17-informes-pa
 1. **OKX apaga el puerto WS 8443 el 31-10-2026.** `src/pavilos/connectors/venues.py:69` usa
    `wss://ws.okx.com:8443/ws/v5/public`. Cambiar a `wss://ws.okx.com/ws/v5/public` (443; probado el 17-10). Si no, el
    feed de OKX spot muere ese día. Es una línea, más un reinicio corto del recorder. [DER-01]
-2. **Espacio en D:** 117 GiB libres el 21-10; por debajo de 100 GiB la grabación se pausa (no borra nada). Otros
+2. **Espacio en D:** 106 GiB libres el 23-10. Desde el 23-10 la grabación se pausa por debajo de **20 GiB** (antes
+   100; decisión del operador) y no borra nada. Otros
    proyectos consumen D: a ráfagas. **El operador lo resuelve (21-10).** Propuesta técnica: lake frío (pre-M17) en L:,
    caliente en un SSD con suelo propio. [RA-01, RA-05]
 
