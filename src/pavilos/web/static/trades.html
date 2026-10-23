@@ -75,6 +75,7 @@
   .seg button { flex:1; margin-left:-1px; padding:5px 6px; }
   .seg button:first-child { margin-left:0; }
   .seg button.on { background:rgba(79,214,224,.10); color:var(--cyan); border-color:var(--cyan-dim); position:relative; z-index:1; }
+  .seg.off { opacity:.4; pointer-events:none; }
   .lbl { font-size:9.5px; letter-spacing:2px; color:var(--ink-faint); text-transform:uppercase; white-space:nowrap; }
 
   /* ─── cabecera ───────────────────────────────────────────────────────────── */
@@ -396,13 +397,18 @@
 
       <div class="fg">
         <h3>Cómo contar</h3>
+        <div class="frow"><span>Desde</span>
+          <div class="seg" id="f-medida"><button type="button" data-v="actual" title="Solo los trades de la medición actual, con su balance inicial">Medición actual</button><button type="button" data-v="todo" title="Todo el historial desde el 8-06">Todo</button></div>
+        </div>
+        <div class="hint" id="medida-hint" style="margin-top:4px"></div>
         <div class="frow"><span>Tamaño</span>
           <div class="seg" id="f-size"><button type="button" data-v="norm" title="Cada trade como si hubiera sido de 10.000 €: comparable entre trades y sesiones">10.000 €</button><button type="button" data-v="real" title="Los importes tal como se registraron (hasta el 23-10, el 1 % del capital de cada sesión)">Registrado</button></div>
         </div>
         <div class="frow"><span>8–9 jun</span>
           <div class="seg" id="f-setup"><button type="button" data-v="estable" title="Excluye los 758 trades hechos mientras se añadían exchanges (6 → 14) y se cambiaba la frecuencia">Excluir</button><button type="button" data-v="todo">Incluir</button></div>
         </div>
-        <div class="hint">Por defecto, cada trade a 10.000 € y sin la puesta en marcha del 8–9 de junio. «Cómo leer estas cifras», arriba, lo explica.</div>
+        <div class="hint">Por defecto, la medición actual, cada trade a 10.000 € y sin la puesta en marcha del 8–9 de junio. «Cómo leer estas cifras», arriba, lo explica.</div>
+        <div class="side-foot" style="padding-top:9px"><button type="button" id="btn-period" title="Pone el balance del paper a 10.000 € y empieza a contar desde ahora. No borra ningún trade: la medición anterior queda en el historial.">Nueva medición (balance a 10.000 €)</button></div>
       </div>
 
       <div class="fg">
@@ -459,6 +465,7 @@
       <details class="howto" id="howto">
         <summary>Cómo leer estas cifras</summary>
         <ul>
+          <li><b>Medición actual.</b> Por defecto la página cuenta desde el inicio de la medición actual (el 23-10, cuando empezó la medición veraz), con su balance inicial. «Todo» muestra el historial completo. «Nueva medición» pone el balance a 10.000 € y cuenta desde ese momento sin borrar nada: los trades anteriores siguen en el historial y la medición anterior queda registrada.</li>
           <li><b>Tamaño a 10.000 €.</b> Hasta el 23-10 el paper dimensionaba cada trade con el 1 % del capital de su sesión, que se iba gastando: hubo trades de 4 € y de 96.000 €, que no se pueden sumar ni comparar. Por defecto cada trade se cuenta como si hubiera sido de 10.000 € (el resultado en pb no cambia). Desde el 23-10 el paper ya opera así.</li>
           <li><b>Sesiones.</b> Hasta el 23-10, cada arranque del programa reponía la cuenta a 10.000 € y perdía la posición que estuviera abierta (unas 2 en total, estimado). Por eso el P&amp;L registrado suma una cuenta de 10.000 € por arranque: no es el resultado de una sola cuenta. Las líneas verticales de la curva marcan los arranques; la pestaña «Sesión» del desglose las resume. Desde el 23-10 la cuenta continúa entre arranques, y una posición abierta al apagar se cierra al volver con el motivo <span class="rsn restart">restart</span>.</li>
           <li><b>Puesta en marcha.</b> Hasta el reinicio del 9-06 a las 13:20 UTC se estaban añadiendo exchanges (6 → 14) y cambiando la frecuencia de cálculo: 758 trades. Se excluyen por defecto.</li>
@@ -591,12 +598,13 @@
   const blankRanges = () => Object.fromEntries(RANGES.map((r) => [r.k, [null, null]]));
   const defaults = () => ({ sym: "ALL", side: "ALL", res: "ALL", reasons: null, preset: "todo", from: null, to: null,
                             tf: "exit", r: blankRanges(), hf: null, ht: null, wd: ALL_WD.slice(), q: "", tz: "local",
-                            cap: null, size: "norm", setup: "estable" });
+                            cap: null, size: "norm", setup: "estable", medida: "actual" });
   let F = defaults();
   const S = {
     all: [], norm: [], byId: new Map(), byIdNorm: new Map(), filteredIds: new Set(),
     dropped: 0, boot: null, total: 0, startEquity: 10000,
     refNotional: 10000, stableSince: null, runs: [], runSrc: [], activeDays: null, activeKey: "",
+    period: { available: false },
     symbols: [], reasons: [], filtered: [], view: [], m: null,
     sel: null, sort: { key: "exit_ts", dir: "desc" }, bk: "day", bkSort: null,
     live: true, lastOk: null, err: null, loaded: false, polling: false, lastApply: 0, applyMs: 0,
@@ -623,6 +631,7 @@
     if (F.q) p.set("q", F.q);
     if (F.tz !== "local") p.set("zona", F.tz);
     if (F.cap != null) p.set("capital", F.cap);
+    if (F.medida !== "actual") p.set("medida", F.medida);
     if (F.size !== "norm") p.set("tam", F.size);
     if (F.setup !== "estable") p.set("puesta", F.setup);
     if (S.sort.key !== "exit_ts" || S.sort.dir !== "desc") p.set("orden", S.sort.key + ":" + S.sort.dir);
@@ -655,6 +664,7 @@
     if (p.get("zona") === "utc") f.tz = "utc";
     const cap = nv(p.get("capital"));
     if (cap != null && cap > 0) f.cap = cap;
+    if (p.get("medida") === "todo") f.medida = "todo";
     if (p.get("tam") === "real") f.size = "real";
     if (p.get("puesta") === "todo") f.setup = "todo";
     const ord = (p.get("orden") || "").split(":");
@@ -669,12 +679,23 @@
     if (F.preset === "custom") return { from: F.from, to: F.to };
     return M.periodBounds(F.preset, Date.now() / 1000, F.tz);
   }
-  function baseCapital() { return F.cap != null ? F.cap : S.startEquity; }
+  const periodOn = () => F.medida === "actual" && S.period.available && S.period.since > 0;
+  function baseCapital() {
+    if (F.cap != null) return F.cap;
+    return periodOn() ? S.period.equity0 : S.startEquity;
+  }
+  // Primer instante que cuenta: el inicio de la medición actual, o (con «Todo») el final de la
+  // puesta en marcha si se excluye.
+  function countFrom() {
+    const setup = F.setup === "estable" ? S.stableSince : null;
+    if (periodOn()) return setup != null ? Math.max(S.period.since, setup) : S.period.since;
+    return setup;
+  }
   function filterSpec() {
     const b = currentBounds();
     const spec = { symbol: F.sym, side: F.side, result: F.res, reasons: F.reasons, from: b.from, to: b.to,
                    timeField: F.tf, hourFrom: F.hf, hourTo: F.ht, weekdays: F.wd.length === 7 ? null : F.wd,
-                   tz: F.tz, text: F.q, notBefore: F.setup === "estable" ? S.stableSince : null };
+                   tz: F.tz, text: F.q, notBefore: countFrom() };
     for (const r of RANGES) { spec[r.f[0]] = F.r[r.k][0]; spec[r.f[1]] = F.r[r.k][1]; }
     return spec;
   }
@@ -833,7 +854,13 @@
   function syncInputs() {
     $("#f-sym").value = F.sym;
     syncSeg("f-tz", F.tz); syncSeg("f-tf", F.tf); syncSeg("f-side", F.side); syncSeg("f-res", F.res);
-    syncSeg("f-size", F.size); syncSeg("f-setup", F.setup);
+    syncSeg("f-size", F.size); syncSeg("f-setup", F.setup); syncSeg("f-medida", F.medida);
+    // la puesta en marcha (8–9 jun) es anterior a la medición actual: solo cuenta con «Todo»
+    $("#f-setup").classList.toggle("off", periodOn());
+    $("#medida-hint").textContent = periodOn()
+      ? `Desde ${M.fmtDate(S.period.since, F.tz)} · balance inicial ${eur(S.period.equity0, 0)}`
+      : (S.period.available ? "Todo el historial, desde el 8-06" : "Sin medición guardada: se cuenta todo el historial");
+    $("#btn-period").disabled = !S.period.available;
     $$("#f-presets button").forEach((b) => b.classList.toggle("on", b.dataset.v === F.preset));
     const b = currentBounds();
     $("#f-from").value = M.toDateInput(b.from, F.tz);
@@ -865,6 +892,25 @@
     seg("f-res", (v) => { F.res = v; });
     seg("f-size", (v) => { F.size = v; });
     seg("f-setup", (v) => { F.setup = v; });
+    seg("f-medida", (v) => { F.medida = v; });
+    $("#btn-period").addEventListener("click", async () => {
+      if (!confirm("¿Empezar una medición nueva?\n\nEl balance del paper vuelve a 10.000 € y la página cuenta " +
+                   "desde ahora. No se borra ningún trade: el historial completo sigue en «Todo» y la medición " +
+                   "anterior queda registrada.")) return;
+      try {
+        const res = await fetch("/api/paper/new-period", {
+          method: "POST", headers: { "Content-Type": "application/json", "X-Pavilos": "1" },
+          body: JSON.stringify({ note: "desde /trades" }) });
+        const body = await res.json();
+        if (!res.ok || !body.ok) { toast(body.error || ("Error " + res.status)); return; }
+        S.period = Object.assign({ available: true }, body);
+        F.medida = "actual";
+        syncInputs(); renderAccount(); apply();
+        toast(`Medición nueva desde ${M.fmtDate(body.since, F.tz)}: balance a ${eur(body.equity0, 0)}`);
+      } catch (e) {
+        toast("No se pudo empezar la medición nueva: " + e);
+      }
+    });
     seg("f-presets", (v) => { F.preset = v; F.from = F.to = null; });
     const dateChange = (which) => () => change(() => {
       const b = currentBounds();
@@ -1063,7 +1109,10 @@
       `<span title="Cada trade como si hubiera sido de ${eur(ref, 0)}"><span class="k">A ${eur(ref, 0)} por trade</span><b class="num">${sEur(netNorm)}</b></span>` +
       `<span title="Tal como quedó en el log: hasta el 23-10, una cuenta de 10.000 € por cada arranque"><span class="k">Registrado</span><b class="num">${sEur(net)}</b> <span class="dim">en ${int(sessions)} sesiones</span></span>` +
       `<span><span class="k">Win rate</span><b class="num">${pct(n ? wins / n * 100 : null, 2)}</b></span>` +
-      `<span class="note">todos los pares y fechas, sin filtros · el registrado es el del panel en vivo</span>`;
+      (S.period.available
+        ? `<span title="Desde el inicio de la medición actual"><span class="k">Medición actual</span><b class="num">desde ${M.fmtDate(S.period.since, F.tz)}</b> <span class="dim">· balance del paper</span> <b class="num">${eur(S.period.equity)}</b></span>`
+        : "") +
+      `<span class="note">todos los pares y fechas, sin filtros · el registrado es el total del log</span>`;
   }
   function renderCount() {
     const n = S.filtered.length;
@@ -1685,20 +1734,37 @@
     el.title = S.err ? "Error al leer /api/trades: " + S.err + ". Se reintenta cada 5 s." : "Se consultan los trades nuevos cada 5 s.";
     $("#btn-live").textContent = S.live ? "Pausar" : "Reanudar";
   }
+  // Cuenta paper: medición actual (inicio, balance inicial) y balance. True si cambió la medición.
+  async function fetchPaper() {
+    try {
+      const res = await fetch("/api/paper", { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const p = await res.json();
+      const changed = p.available !== S.period.available || p.since !== S.period.since;
+      S.period = p;
+      return changed;
+    } catch (e) {
+      return false;                                    // sin datos de la cuenta: se cuenta todo
+    }
+  }
   async function tick() {
     if (S.polling) return;
     S.polling = true;
     try {
       const r = await fetchTrades(!S.loaded);
+      const periodChanged = await fetchPaper();
       S.err = null; S.lastOk = Date.now();
       if (!S.loaded) {
         S.loaded = true;
         buildDataControls(); renderAccount(); syncInputs(); apply();
         $("#loading").classList.add("off");
-      } else if (r.reset || r.added) {
+      } else if (r.reset || r.added || periodChanged) {
         buildDataControls(); renderAccount(); syncInputs(); apply(true);
         const box = $("#count-box"); box.classList.remove("flash"); void box.offsetWidth; box.classList.add("flash");
-      } else if (ROLLING.has(F.preset) && Date.now() - S.lastApply > 60000) {
+      } else if (S.period.available) {
+        renderAccount();                               // el balance del paper se mueve con la posición
+      }
+      if (ROLLING.has(F.preset) && Date.now() - S.lastApply > 60000) {
         apply(true);                                  // la ventana móvil avanza aunque no haya trades nuevos
       }
     } catch (e) {

@@ -50,7 +50,9 @@ del 2026-10-17, con evidencia completa en [`docs/analisis/2026-10-17-informes-pa
 16. **Varios procesos antes de añadir pares:** el proceso actual no aguanta BTC+ETH+SOL (probado). [RA-03, RA-06, R12]
 17. La retención eterna supera la capacidad a partir del escenario S2: hace falta un HDD de 16-20 TB para frío más una
     segunda copia. Decisión de compra del operador. [RA-09]
-18. Vaciar el escritor al apagar Windows (`CTRL_SHUTDOWN_EVENT`) y generar `_gaps.json` automáticamente. [RA-11]
+18. ✅ **Vaciar el escritor al apagar Windows** (hecho el 23-10). No sirve `CTRL_SHUTDOWN_EVENT`: el proceso carga
+    user32, así que Windows avisa con `WM_ENDSESSION` a una ventana oculta. **Falta** generar `_gaps.json`
+    automáticamente. [RA-11]
 19. `.tmp/` del repo: 17 GB de volcados viejos de DuckDB. Borrar solo con el OK del operador.
 
 ## 🔵 Expansión (después de lo anterior)
@@ -120,3 +122,14 @@ paralelo. El propio análisis degradó el recorder [R1].
   - **`/trades`:** cuenta cada trade a 10.000 € por defecto, excluye la puesta en marcha (8–9 jun), muestra las sesiones
     y la guía «Cómo leer estas cifras», y calcula los ratios solo con los días en marcha.
   - **Auditoría:** `scripts/audit_trades.py` (solo lectura) reconstruye las sesiones y exporta los trades anotados.
+- 2026-10-23: mediciones y persistencia.
+  - **Mediciones:** las dos páginas cuentan por defecto desde el inicio de la medición actual (23-10 22:44); «Todo»
+    muestra el historial completo.
+  - **«Nueva medición»** pone el balance a 10.000 € sin borrar nada.
+  - **Si el programa cae:**
+    - el stop y un pulso cada 30 s quedan guardados;
+    - una posición abierta sigue tras un corte de ≤ 5 min;
+    - al apagar el PC se guarda la cuenta y se vacía el grabador;
+    - los trades se escriben a disco con fsync.
+  - **Reinicio ordenado** (`POST /api/admin/restart` con la cabecera `X-Pavilos: 1`): es la forma de desplegar sin
+    perder datos.

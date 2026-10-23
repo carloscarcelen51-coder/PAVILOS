@@ -754,12 +754,17 @@
     var winRate  = isFinite(sum.win_rate)     ? sum.win_rate     : null;
     var wins     = isFinite(sum.wins)         ? sum.wins         : null;
     var losses   = isFinite(sum.losses)       ? sum.losses       : null;
+    // since: start of the current measurement period (the summary counts from there)
+    var since    = (isFinite(sum.since) && sum.since > 0) ? new Date(sum.since * 1000) : null;
+    var two = function (n) { return (n < 10 ? "0" : "") + n; };
 
     var wrap = el('<div class="pnl-summary"></div>');
 
     var head = el(
       '<div class="sum-head">' +
-        '<span class="lbl">all-time realized P&amp;L</span>' +
+        '<span class="lbl">' + (since == null ? 'all-time realized P&amp;L'
+          : 'P&amp;L realizado desde ' + two(since.getDate()) + '/' + two(since.getMonth() + 1) + ' ' +
+            two(since.getHours()) + ':' + two(since.getMinutes())) + '</span>' +
         '<span><span class="v num ' + signCls(realized) + '">' +
           (realized == null ? EM : (eurSigned(realized) || EM)) + '</span>' +
         '<span class="ret num ' + signCls(ret) + '">' +

@@ -6,6 +6,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import math
+import os
 from pathlib import Path
 
 from pavilos.execution.broker import Trade
@@ -30,6 +31,8 @@ class TradeLog:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(dataclasses.asdict(trade)) + "\n")
+            f.flush()
+            os.fsync(f.fileno())                # on disk before returning: survives a power cut
 
     def load(self) -> list[Trade]:
         if not self._path.exists():

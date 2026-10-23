@@ -5,6 +5,7 @@ served by a FastAPI/uvicorn dashboard. Bounded shutdown; supervised trading loop
 from __future__ import annotations
 
 import asyncio
+import bisect
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -35,6 +36,14 @@ _SYMBOLS = {"kraken": "BTC/USD", "binance": "BTCUSDT", "coinbase": "BTC-USD",
 def _wall_now() -> float:
     import time
     return time.time()
+
+
+def _first_period(all_trades, starting_equity: float, now: float) -> dict:
+    """The period of a paper state saved before periods existed (2026-10-23): it began with the
+    truthful measurement, i.e. just before the first trade that carries an entry context."""
+    first = next((t.entry_ts for t in all_trades if getattr(t, "context", None)), None)
+    return {"since": (first - 1.0) if first is not None else now, "equity0": starting_equity, "history": [],
+            "note": "medición veraz (23-10)"}
 
 
 def _loop_exception_handler(loop, context: dict) -> None:
@@ -102,6 +111,11 @@ class RuntimeConfig:
     # USDT/USDC -> USD from Kraken into the aggregator (was fixed at 1.0; USDT ~ -12 bp)
     peg_live: bool = True
     peg_interval_s: float = 30.0
+    paper_resume_max_s: float = 300.0   # outage up to this long: an open position simply goes on;
+                                        # longer: it closes at the first price (reason "restart")
+    paper_heartbeat_s: float = 30.0     # the paper state is re-saved this often (its last_alive gives
+                                        # the length of an outage to the next start)
+    shutdown_watch: bool = True         # on a PC shutdown / log-off: save the account, flush the recorder
     # raw-L2 data layer. Recording is ON, writing ONLY inside this new D: folder
     # (never touches other files on D:). Lossless compact encoding (M17): GB/day measured after deploy.
     book_data_dir: str | None = r"D:\pavilos_book_data"
@@ -116,7 +130,9 @@ class RuntimeConfig:
 class Runtime:
     def __init__(self, engine: Engine, trading_engine: TradingEngine,
                  state: DashboardState, config: RuntimeConfig,
-                 all_trades, trade_log, recorder=None, peg_feed: PegFeed | None = None) -> None:
+                 all_trades, trade_log, recorder=None, peg_feed: PegFeed | None = None, *,
+                 paper_state: PaperState | None = None, period: dict | None = None,
+                 now: Callable[[], float] = _wall_now) -> None:
         self.engine = engine
         self.trading_engine = trading_engine
         self.state = state
@@ -125,6 +141,80 @@ class Runtime:
         self.trade_log = trade_log
         self.recorder = recorder
         self.peg_feed = peg_feed
+        self.paper_state = paper_state
+        self.period = period if period is not None else {"since": 0.0, "equity0": config.starting_equity,
+                                                         "history": []}
+        self._now = now
+        self._stop_event: asyncio.Event | None = None
+        self.restart_requested = False
+
+    # --- paper account: measurement period, saving -----------------------------
+    def paper_info(self) -> dict:
+        broker = self.trading_engine.broker
+        return {"since": self.period["since"], "equity0": self.period["equity0"],
+                "history": list(self.period.get("history", [])), "equity": broker.equity(),
+                "position_open": broker.position() is not None,
+                "starting_equity": self.config.starting_equity,
+                "persisted": self.paper_state is not None}
+
+    def start_new_period(self, note: str = "") -> dict:
+        """A new measurement period: cash back to the starting equity and the dashboards count
+        from now. Nothing is deleted (the trade log is untouched; the old period is kept in the
+        history). Runs on the event loop, like the trading; RuntimeError if a position is open."""
+        broker = self.trading_engine.broker
+        if broker.position() is not None:
+            raise RuntimeError("hay una posición abierta: reinténtalo cuando se cierre (suelen durar segundos)")
+        t = self._now()
+        old = {"since": self.period["since"], "until": t, "equity0": self.period["equity0"],
+               "equity_end": broker.equity(), "note": self.period.get("note", "")}
+        self.period.setdefault("history", []).append(old)
+        self.period.update(since=t, equity0=self.config.starting_equity, note=note)
+        broker.reset_cash(self.config.starting_equity)       # saves the state with the new period
+        self.trading_engine.signal.cancel_pending()
+        _log.warning("paper account: new measurement period from now (cash %.2f -> %.2f)%s",
+                     old["equity_end"], self.config.starting_equity, f": {note}" if note else "")
+        return self.paper_info()
+
+    def save_state_now(self) -> None:
+        if self.paper_state is None:
+            return
+        try:
+            self.paper_state.save(self.trading_engine.broker.export_state())
+        except Exception:
+            _log.exception("failed to save the paper account to %s", self.paper_state.path)
+
+    def request_restart(self) -> None:
+        """Planned restart: stop cleanly (recorder flushed, account saved) and exit with a non-zero
+        code so the supervisor starts a fresh process -- unlike a kill, nothing is lost."""
+        self.restart_requested = True
+        _log.warning("restart requested: stopping cleanly, the supervisor starts a fresh process")
+        if self._stop_event is not None:
+            self._stop_event.set()
+
+    def _on_session_end(self, reason: str) -> None:
+        # Runs on the shutdown watcher's thread while Windows waits (a few seconds): save the
+        # account and flush whatever the recorder still holds. The process is killed after.
+        _log.warning("Windows is ending the session (%s): saving the paper account and flushing "
+                     "the recorder before the process is terminated", reason)
+        self.save_state_now()
+        if self.recorder is not None:
+            try:
+                self.recorder.stop(timeout=4.0)
+            except Exception:
+                _log.exception("recorder flush on session end failed")
+        for h in logging.getLogger().handlers:
+            try:
+                h.flush()
+            except Exception:
+                pass
+
+    async def _heartbeat(self, stop: "asyncio.Event") -> None:
+        while not stop.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=self.config.paper_heartbeat_s)
+            except asyncio.TimeoutError:
+                pass
+            self.save_state_now()
 
     @classmethod
     def build(cls, config: RuntimeConfig, *,
@@ -177,9 +267,16 @@ class Runtime:
             except Exception:
                 _log.exception("failed to persist trade to %s", config.trade_log_path)
 
-        paper_state = PaperState(config.paper_state_path) if config.paper_state_path else None
+        paper_state = PaperState(config.paper_state_path, now=now) if config.paper_state_path else None
+        last_stop_save = [0.0]
 
         def _on_state(snapshot: dict) -> None:
+            # a trailing-stop move saves at most once a second; entries and exits always
+            if snapshot.get("stop_only"):
+                t = now()
+                if t - last_stop_save[0] < 1.0:
+                    return
+                last_stop_save[0] = t
             try:
                 paper_state.save(snapshot)
             except Exception:
@@ -187,21 +284,41 @@ class Runtime:
 
         broker = PaperBroker(starting_equity=config.starting_equity, on_trade=_on_trade,
                              on_state=(_on_state if paper_state is not None else None))
+        # Measurement period: the dashboards count trades from period["since"] by default. Without
+        # a saved account (tests, backtests) it is the whole history, as before.
+        period = {"since": 0.0, "equity0": config.starting_equity, "history": []}
         if paper_state is not None:
             saved = paper_state.load()
             if saved is not None:
+                period = saved["period"] or _first_period(all_trades, config.starting_equity, now())
+                period.setdefault("history", [])
                 pos = saved["position"]
                 if pos is not None and any(t.entry_ts == pos.get("entry_ts") for t in all_trades[-20:]):
                     # it died after logging the close but before saving the state: already a trade
                     pos = None
+                down = now() - saved["last_alive"] if saved["last_alive"] is not None else None
+                resume = pos is not None and down is not None and 0 <= down <= config.paper_resume_max_s
                 try:
-                    broker.restore(equity=saved["equity"], position=pos)
+                    broker.restore(equity=saved["equity"], position=pos, resume=resume)
+                    if resume:
+                        signal.resume_position(pos["side"], tp=(pos.get("context") or {}).get("tp"))
                     _log.info("paper account continued: equity %.2f%s", saved["equity"],
-                              f"; the {pos['side']} position open at the restart closes at the first price"
-                              if pos else "")
+                              "" if pos is None else
+                              f"; the {pos['side']} position open {down:.0f} s ago goes on" if resume else
+                              f"; the {pos['side']} position open at the stop closes at the first price"
+                              f" (outage {'unknown' if down is None else f'{down:.0f} s'})")
                 except Exception:
                     _log.exception("paper account in %s not restored; starting from %.2f",
                                    config.paper_state_path, config.starting_equity)
+            paper_state.period = period
+            try:
+                paper_state.save(broker.export_state())          # period and last_alive on disk now
+            except Exception:
+                _log.exception("failed to save the paper account to %s", config.paper_state_path)
+
+        def period_trades():
+            i = bisect.bisect_left(all_trades, period["since"], key=lambda t: t.entry_ts)
+            return all_trades[i:]
         state = DashboardState()
 
         def observer(snapshot, analysis, brk) -> None:
@@ -211,11 +328,13 @@ class Runtime:
             state.update(analysis, brk, engine.health(), engine_state=signal.state,
                          now=now(), staleness_s=config.staleness_s,
                          trades=all_trades[-50:],
-                         summary=summarize(all_trades, base_equity=config.starting_equity),
+                         summary={**summarize(period_trades(), base_equity=period["equity0"]),
+                                  "since": period["since"]},
                          recording=(recorder.status() if recorder is not None else None))
 
         trading_engine = TradingEngine(detector, ATR(window=config.atr_window), signal, broker, observer=observer)
-        return cls(engine, trading_engine, state, config, all_trades, trade_log, recorder, peg_feed)
+        return cls(engine, trading_engine, state, config, all_trades, trade_log, recorder, peg_feed,
+                   paper_state=paper_state, period=period, now=now)
 
     async def _supervise_trading(self, stop: "asyncio.Event", *, restart_delay: float = 1.0) -> None:
         """Run TradingEngine.run; on a crash-loud exception, log and restart until stop."""
@@ -275,13 +394,24 @@ class Runtime:
         return create_app(self.state, trades=lambda: self.all_trades,
                           starting_equity=cfg.starting_equity,
                           ref_notional=cfg.fixed_notional or 10_000.0,
-                          runs_file=os.path.join(cfg.book_data_dir, "_runs.jsonl") if cfg.book_data_dir else None)
+                          runs_file=os.path.join(cfg.book_data_dir, "_runs.jsonl") if cfg.book_data_dir else None,
+                          paper=self.paper_info, new_period=self.start_new_period,
+                          restart=self.request_restart)
 
     async def run_app(self, stop: "asyncio.Event | None" = None) -> None:
         import uvicorn
+        from pavilos.core.shutdown_watch import ShutdownWatcher
         stop = stop or asyncio.Event()
+        self._stop_event = stop
         asyncio.get_running_loop().set_exception_handler(_loop_exception_handler)
         janitor = self._start_recording() if self.recorder is not None else None
+        watcher = ShutdownWatcher(self._on_session_end) if self.config.shutdown_watch else None
+        if watcher is not None and not watcher.start():
+            watcher = None                     # not Windows, or the window failed (already logged)
+        if watcher is not None:
+            _log.info("shutdown watcher listening: a PC shutdown or log-off saves the paper account "
+                      "and flushes the recorder first")
+        heartbeat = asyncio.create_task(self._heartbeat(stop)) if self.paper_state is not None else None
         # Live USDT/USDC rates: its first reading lands within a second, long before any
         # zone is persistent enough to trade; it never blocks the recorder's start.
         pegging = asyncio.create_task(self.peg_feed.run(stop)) if self.peg_feed is not None else None
@@ -301,7 +431,10 @@ class Runtime:
             await self.engine.stop()
             if self.recorder is not None:
                 self._stop_recording(janitor)
-            tasks = [t for t in (trading, serving, pegging) if t is not None]
+            tasks = [t for t in (trading, serving, pegging, heartbeat) if t is not None]
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            self.save_state_now()                  # the account as it stands at a clean stop
+            if watcher is not None:
+                watcher.stop()

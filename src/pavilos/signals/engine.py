@@ -75,6 +75,20 @@ class SignalEngine:
         self._armed_ts = 0.0
         self._tp = 0.0
 
+    def resume_position(self, side: str, *, tp: float | None = None) -> None:
+        """After a restart, manage a position restored from the paper state as if it had
+        been opened by this engine (the exit rules only need its side, and reversion its
+        take-profit)."""
+        if side not in ("LONG", "SHORT"):
+            raise ValueError(f"bad side {side!r}")
+        self.state, self._thesis, self._dir = "IN_POSITION", None, side
+        self._tp = tp if (tp is not None and math.isfinite(tp)) else 0.0
+
+    def cancel_pending(self) -> None:
+        """Back to IDLE when the broker dropped the pending entry (e.g. a new period)."""
+        if self.state == "PENDING_ENTRY":
+            self.state, self._thesis, self._dir = "IDLE", None, None
+
     def update(self, analysis: DepthAnalysis, atr: float, broker) -> None:
         price = analysis.mid
         broker.on_price(price, ts=analysis.ts)   # process fills/funding first

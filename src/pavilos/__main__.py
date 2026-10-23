@@ -13,6 +13,8 @@ from pathlib import Path
 from pavilos.connectors.venues import VENUE_SPECS
 from pavilos.core.runtime import Runtime, RuntimeConfig
 
+RESTART_EXIT_CODE = 3        # planned restart (POST /api/admin/restart): the supervisor relaunches
+
 _LOG_DIR = Path(__file__).resolve().parents[2] / "logs"   # <project>/logs
 _LOG_MAX_BYTES = 20 * 1024 * 1024
 _LOG_BACKUPS = 5
@@ -112,6 +114,11 @@ def main() -> None:
         asyncio.run(rt.run_app())
     except KeyboardInterrupt:
         _log.info("shutting down")
+    if getattr(rt, "restart_requested", False):
+        # a clean exit (code 0) would stop the supervisor; any other code makes it start a
+        # fresh process within seconds
+        _log.info("planned restart: exiting with code %d so the supervisor relaunches", RESTART_EXIT_CODE)
+        raise SystemExit(RESTART_EXIT_CODE)
 
 
 if __name__ == "__main__":

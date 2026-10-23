@@ -151,7 +151,7 @@ def test_paper_state_file_round_trip_and_unreadable_file_is_kept(tmp_path):
         st.save({"equity": float("nan"), "position": None})
 
 
-def _runtime(tmp_path, **kw):
+def _runtime(tmp_path, *, now=None, **kw):
     from pavilos.connectors.base import ConnectorHealth
     from pavilos.core.runtime import Runtime, RuntimeConfig
 
@@ -162,26 +162,45 @@ def _runtime(tmp_path, **kw):
 
     cfg = RuntimeConfig(trade_log_path=str(tmp_path / "trades.jsonl"), book_data_dir=None, peg_live=False,
                         paper_state_path=str(tmp_path / "paper_state.json"), **kw)
-    return Runtime.build(cfg, connector_factory=lambda v, sym: _FakeConnector(v))
+    extra = {"now": now} if now is not None else {}
+    return Runtime.build(cfg, connector_factory=lambda v, sym: _FakeConnector(v), **extra)
 
 
-def test_runtime_keeps_the_account_and_closes_an_orphan_position_after_a_restart(tmp_path):
-    rt = _runtime(tmp_path)
+def test_after_a_long_outage_an_orphan_position_closes_as_restart(tmp_path):
+    rt = _runtime(tmp_path, now=lambda: 1_000.0)
     bk = rt.trading_engine.broker
     bk.place_entry("LONG", trigger=100.0, stop=95.0, size=1.0)
-    bk.on_price(100.0, ts=1.0)                          # open ... and the process "dies" here
+    bk.on_price(100.0, ts=1_000.0)                      # open ... and the process "dies" here
     saved = json.loads((tmp_path / "paper_state.json").read_text(encoding="utf-8"))
-    assert saved["position"]["side"] == "LONG"
+    assert saved["position"]["side"] == "LONG" and saved["last_alive"] == 1_000.0
 
-    rt2 = _runtime(tmp_path)
+    rt2 = _runtime(tmp_path, now=lambda: 1_000.0 + 3_600)  # an hour later: what happened is unknown
     bk2 = rt2.trading_engine.broker
     assert bk2.equity() == pytest.approx(saved["equity"]) and bk2.position() is not None
-    bk2.on_price(101.0, ts=99.0)
+    bk2.on_price(101.0, ts=4_600.0)
     logged = TradeLog(str(tmp_path / "trades.jsonl")).load()
     assert [t.reason for t in logged] == ["restart"] and rt2.all_trades[-1].reason == "restart"
-    rt3 = _runtime(tmp_path)                            # nothing left open: a plain continuation
+    rt3 = _runtime(tmp_path, now=lambda: 4_700.0)       # nothing left open: a plain continuation
     assert rt3.trading_engine.broker.position() is None
     assert rt3.trading_engine.broker.equity() == pytest.approx(bk2.equity())
+
+
+def test_after_a_short_outage_the_position_goes_on_with_its_saved_stop(tmp_path):
+    rt = _runtime(tmp_path, now=lambda: 1_000.0)
+    bk = rt.trading_engine.broker
+    bk.place_entry("LONG", trigger=100.0, stop=95.0, size=1.0)
+    bk.on_price(100.0, ts=1_000.0)
+    bk.modify_stop(97.0)                                # trailing move: saved too
+
+    rt2 = _runtime(tmp_path, now=lambda: 1_000.0 + 20)  # 20 s later: the supervisor relaunched it
+    bk2, sig2 = rt2.trading_engine.broker, rt2.trading_engine.signal
+    assert bk2.position() is not None and bk2.position().stop == 97.0
+    assert sig2.state == "IN_POSITION"
+    bk2.on_price(100.5, ts=1_021.0)                     # inside the stop: it simply goes on
+    assert bk2.position() is not None and TradeLog(str(tmp_path / "trades.jsonl")).load() == []
+    bk2.on_price(96.0, ts=1_022.0)                      # the saved stop still protects it
+    (t,) = TradeLog(str(tmp_path / "trades.jsonl")).load()
+    assert t.reason == "stop" and t.entry_ts == 1_000.0 and t.exit == 96.0
 
 
 def test_runtime_does_not_duplicate_a_trade_already_in_the_log(tmp_path):

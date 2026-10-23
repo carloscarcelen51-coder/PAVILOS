@@ -122,6 +122,7 @@ class PaperBroker:
             raise RuntimeError("no position to modify")
         p = self._position
         self._position = Position(p.side, p.size, p.entry, new_stop)
+        self._notify_state(stop_only=True)
 
     def close(self, *, ts: float) -> None:
         if self._position is not None:
@@ -232,10 +233,13 @@ class PaperBroker:
             },
         }
 
-    def restore(self, *, equity: float, position: dict | None = None) -> None:
+    def restore(self, *, equity: float, position: dict | None = None, resume: bool = False) -> None:
         """Continue a paper account after a restart: its realized cash (any finite value:
         a fixed-notional paper account can go below zero) and the position that was open
-        when the process died, which is closed at the FIRST price seen (reason "restart")."""
+        when the process died. With ``resume`` (a short outage) the position simply goes on
+        with its saved stop; otherwise what the price did meanwhile is unknown, so it is
+        closed at the FIRST price seen (reason "restart"). Either way a first price beyond
+        the stop fills it there, like any stop."""
         if not math.isfinite(equity):
             raise ValueError("restore: equity must be finite")
         if self._position is not None or self._pending is not None:
@@ -255,13 +259,25 @@ class PaperBroker:
             self._entry_ts = float(position["entry_ts"])
             self._entry_fee = float(position.get("entry_fee", 0.0))
             self._entry_context = position.get("context")
-            self._restart_close = True
+            self._funding_anchor_ts = self._entry_ts
+            self._restart_close = not resume
 
-    def _notify_state(self) -> None:
+    def reset_cash(self, equity: float) -> None:
+        """Start a new measurement period: realized cash back to ``equity``. Only when flat
+        (an open position would carry P&L from before the reset); a pending entry is dropped."""
+        if not (math.isfinite(equity) and equity > 0):
+            raise ValueError("reset_cash: equity must be positive")
+        if self._position is not None:
+            raise RuntimeError("reset_cash: a position is open; retry once it closes")
+        self._pending = None
+        self._equity = equity
+        self._notify_state()
+
+    def _notify_state(self, *, stop_only: bool = False) -> None:
         if self._on_state is None:
             return
         try:
-            self._on_state(self.export_state())
+            self._on_state({**self.export_state(), "stop_only": stop_only})
         except Exception:
             _log.exception("on_state callback failed; paper account state not saved")
 
